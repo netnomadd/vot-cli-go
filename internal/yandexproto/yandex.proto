@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package yandex;
 
+option go_package = "github.com/netnomadd/vot-cli-go/internal/yandexproto;yandexproto";
+
 // VIDEO TRANSLATION
 message VideoTranslationHelpObject {
   string target = 1;   // "video_file_url" or "subtitles_file_url"

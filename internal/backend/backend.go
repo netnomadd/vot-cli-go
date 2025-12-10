@@ -13,21 +13,20 @@ const (
 	VoiceStyleTTS  VoiceStyle = "tts"
 )
 
-// TranslateParams contains high-level parameters for a translation request.
+// TranslateParams contains high-level parameters for a VOT video translation request.
 type TranslateParams struct {
 	URL          string
 	RequestLang  string
 	ResponseLang string
 	DirectURL    bool
 	SubsURL      string
-	UseM3U8      bool
 	VoiceStyle   VoiceStyle
 	BypassCache  bool
 	WasStream    bool
 	VideoTitle   string
 }
 
-// TranslateResult contains essential data returned from backend.
+// TranslateResult contains essential data returned from a video translation.
 type TranslateResult struct {
 	AudioURL      string
 	Duration      float64
@@ -35,7 +34,20 @@ type TranslateResult struct {
 	IsLivelyVoice bool
 }
 
+// StreamParams contains parameters for a stream (m3u8) translation request.
+type StreamParams struct {
+	URL          string
+	RequestLang  string
+	ResponseLang string
+}
+
+// StreamResult contains data returned from a successful stream translation.
+type StreamResult struct {
+	StreamURL string
+}
+
 // Client is a generic interface for a VOT backend implementation.
 type Client interface {
 	TranslateVideo(ctx context.Context, p TranslateParams) (TranslateResult, error)
+	TranslateStream(ctx context.Context, p StreamParams) (StreamResult, error)
 }
