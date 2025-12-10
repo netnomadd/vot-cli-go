@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package yandex;
+
+// VIDEO TRANSLATION
+message VideoTranslationHelpObject {
+  string target = 1;   // "video_file_url" or "subtitles_file_url"
+  string targetUrl = 2; // raw url to video file or subs
+}
+
+message VideoTranslationRequest {
+  string url = 3;
+  optional string deviceId = 4;
+  bool firstRequest = 5;
+  double duration = 6;
+  int32 unknown0 = 7; // 1 1
+  string language = 8; // source language code
+  bool forceSourceLang = 9; // 0 - auto, 1 - user-selected
+  int32 unknown1 = 10; // 0 0
+  repeated VideoTranslationHelpObject translationHelp = 11;
+  bool wasStream = 13;
+  string responseLanguage = 14;
+  int32 unknown2 = 15; // 1?
+  int32 unknown3 = 16; // before april 2025 is 1, now 2
+  bool bypassCache = 17;
+  bool useLivelyVoice = 18;
+  string videoTitle = 19;
+}
+
+message VideoTranslationResponse {
+  optional string url = 1;
+  optional double duration = 2;
+  int32 status = 4;
+  optional int32 remainingTime = 5;
+  optional int32 unknown0 = 6;
+  string translationId = 7;
+  optional string language = 8;
+  optional string message = 9;
+  bool isLivelyVoice = 10;
+  optional int32 unknown2 = 11;
+  optional int32 shouldRetry = 12;
+  optional int32 unknown3 = 13;
+}
+
+message VideoTranslationCacheItem {
+  int32 status = 1;
+  optional int32 remainingTime = 2;
+  optional string message = 3;
+  optional int32 unknown0 = 4;
+}
+
+message VideoTranslationCacheRequest {
+  string url = 1;
+  double duration = 2;
+  string language = 3;
+  string responseLanguage = 4;
+}
+
+message VideoTranslationCacheResponse {
+  VideoTranslationCacheItem default = 1;
+  VideoTranslationCacheItem cloning = 2;
+}
+
+message AudioBufferObject {
+  bytes audioFile = 2;
+  string fileId = 1;
+}
+
+message PartialAudioBufferObject {
+  bytes audioFile = 2;
+  int32 chunkId = 1;
+}
+
+message ChunkAudioObject {
+  PartialAudioBufferObject audioBuffer = 1;
+  int32 audioPartsLength = 2;
+  string fileId = 3;
+  int32 version = 4;
+}
+
+message VideoTranslationAudioRequest {
+  string translationId = 1;
+  string url = 2;
+  optional ChunkAudioObject partialAudioInfo = 4;
+  optional AudioBufferObject audioInfo = 6;
+}
+
+message VideoTranslationAudioResponse {
+  int32 status = 1;
+  repeated string remainingChunks = 2;
+}
+
+// SUBTITLES
+message SubtitlesObject {
+  string language = 1;
+  string url = 2;
+  int32 unknown0 = 3;
+  string translatedLanguage = 4;
+  string translatedUrl = 5;
+  int32 unknown1 = 6;
+  int32 unknown2 = 7;
+}
+
+message SubtitlesRequest {
+  string url = 1;
+  string language = 2;
+}
+
+message SubtitlesResponse {
+  bool waiting = 1;
+  repeated SubtitlesObject subtitles = 2;
+}
+
+// STREAM TRANSLATION
+message StreamTranslationObject {
+  string url = 1;
+  string timestamp = 2;
+}
+
+message StreamTranslationRequest {
+  string url = 1;
+  string language = 2;
+  string responseLanguage = 3;
+  int32 unknown0 = 5;
+  int32 unknown1 = 6;
+}
+
+enum StreamInterval {
+  NO_CONNECTION = 0;
+  TRANSLATING = 10;
+  STREAMING = 20;
+}
+
+message StreamTranslationResponse {
+  StreamInterval interval = 1;
+  optional StreamTranslationObject translatedInfo = 2;
+  optional int32 pingId = 3;
+}
+
+message StreamPingRequest {
+  int32 pingId = 1;
+}
+
+// SESSIONS
+message YandexSessionRequest {
+  string uuid = 1;
+  string module = 2;
+}
+
+message YandexSessionResponse {
+  string secretKey = 1;
+  int32 expires = 2;
+}
