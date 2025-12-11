@@ -9,10 +9,11 @@ import (
 
 // Global flags
 var (
-	flagConfig string
-	flagSilent bool
-	flagDebug  bool
-	flagLang   string
+	flagConfig  string
+	flagSilent  bool
+	flagDebug   bool
+	flagLang    string
+	flagBackend string
 )
 
 func main() {
@@ -21,6 +22,7 @@ func main() {
 	root.BoolVarP(&flagSilent, "silent", "q", false, "silent mode: only result URLs to stdout, errors to stderr")
 	root.BoolVarP(&flagDebug, "debug", "d", false, "enable debug logging")
 	root.StringVar(&flagLang, "lang", "", "UI language (e.g. ru, en)")
+	root.StringVar(&flagBackend, "backend", "direct", "backend to use: direct or worker")
 
 	if len(os.Args) < 2 {
 		// No subcommand, show help

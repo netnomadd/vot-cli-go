@@ -15,10 +15,10 @@ import (
 
 // messages holds localized user-facing strings for the translate command.
 type messages struct {
-	UsageTranslate     string
-	RespLangRequired   string
-	InvalidVoiceStyle  string
-	ErrorPrefix        string
+	UsageTranslate    string
+	RespLangRequired  string
+	InvalidVoiceStyle string
+	ErrorPrefix       string
 }
 
 // getMessages returns localized messages based on --lang flag or VOT_LANG.
@@ -103,11 +103,27 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		fmt.Fprintf(os.Stderr, "[debug] using config file: %s\n", cfgPath)
 	}
 
-	client := yandexclient.NewDirectClient()
-	if cfg != nil {
-		client.SetUserAgent(cfg.UserAgent)
-		client.SetHMACKey(cfg.YandexHMACKey)
-		client.SetAPIToken(cfg.YandexToken)
+	var client backend.Client
+	switch flagBackend {
+	case "direct", "":
+		c := yandexclient.NewDirectClient()
+		if cfg != nil {
+			c.SetUserAgent(cfg.UserAgent)
+			c.SetHMACKey(cfg.YandexHMACKey)
+			c.SetAPIToken(cfg.YandexToken)
+		}
+		client = c
+	case "worker":
+		c := yandexclient.NewWorkerClient()
+		if cfg != nil {
+			c.SetUserAgent(cfg.UserAgent)
+			c.SetHMACKey(cfg.YandexHMACKey)
+			c.SetAPIToken(cfg.YandexToken)
+		}
+		client = c
+	default:
+		fmt.Fprintf(os.Stderr, "%s: unknown backend '%s' (expected 'direct' or 'worker')\n", msg.ErrorPrefix, flagBackend)
+		os.Exit(1)
 	}
 
 	voiceStyle := backend.VoiceStyleLive
