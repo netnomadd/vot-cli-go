@@ -9,6 +9,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/netnomadd/vot-cli-go/internal/backend"
+	"github.com/netnomadd/vot-cli-go/internal/config"
 	"github.com/netnomadd/vot-cli-go/internal/yandexclient"
 )
 
@@ -56,8 +57,23 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		os.Exit(1)
 	}
 
-	// TODO: wire up config loading, i18n and backend selection (direct vs worker) later.
+	// Load configuration (if any) and initialise direct backend client.
+	cfg, cfgPath, err := config.Load(flagConfig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	if flagDebug && !flagSilent && cfgPath != "" {
+		fmt.Fprintf(os.Stderr, "[debug] using config file: %s\n", cfgPath)
+	}
+
 	client := yandexclient.NewDirectClient()
+	if cfg != nil {
+		client.SetUserAgent(cfg.UserAgent)
+		client.SetHMACKey(cfg.YandexHMACKey)
+		client.SetAPIToken(cfg.YandexToken)
+	}
+
 	voiceStyle := backend.VoiceStyleLive
 	if flagVoiceStyle == "tts" {
 		voiceStyle = backend.VoiceStyleTTS

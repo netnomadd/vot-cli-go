@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -32,6 +33,27 @@ type DirectClient struct {
 
 	// session cache per module (e.g. "video-translation")
 	sessions map[string]*clientSession
+}
+
+// SetUserAgent overrides the default User-Agent if non-empty.
+func (c *DirectClient) SetUserAgent(ua string) {
+	if ua != "" {
+		c.userAgent = ua
+	}
+}
+
+// SetHMACKey overrides the default HMAC key if non-empty.
+func (c *DirectClient) SetHMACKey(key string) {
+	if key != "" {
+		c.hmacKey = key
+	}
+}
+
+// SetAPIToken sets OAuth token used for Lively Voice, if non-empty.
+func (c *DirectClient) SetAPIToken(token string) {
+	if token != "" {
+		c.apiToken = token
+	}
 }
 
 type clientSession struct {
@@ -113,10 +135,46 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 
 	url := resp.GetUrl()
 	if url == "" {
+		status := resp.GetStatus()
+		remaining := resp.GetRemainingTime()
 		msg := resp.GetMessage()
-		if msg == "" {
-			msg = "yandex: translation not ready or failed (empty url)"
+
+		// Use Yandex status/remainingTime to give a clearer hint to the user.
+		switch status {
+		case 2, 3: // WAITING / LONG_WAITING
+			if remaining > 0 {
+				if msg == "" {
+					msg = fmt.Sprintf("yandex: translation is in progress, ~%d seconds remaining", remaining)
+				} else {
+					msg = fmt.Sprintf("yandex: translation is in progress, ~%d seconds remaining: %s", remaining, msg)
+				}
+			} else {
+				if msg == "" {
+					msg = "yandex: translation is in progress (no ETA provided)"
+				} else {
+					msg = fmt.Sprintf("yandex: translation is in progress: %s", msg)
+				}
+			}
+		case 6: // AUDIO_REQUESTED
+			if msg == "" {
+				msg = "yandex: translation audio was requested; please retry in a few seconds"
+			} else {
+				msg = fmt.Sprintf("yandex: translation audio was requested; please retry later: %s", msg)
+			}
+		case 7: // SESSION_REQUIRED
+			if msg == "" {
+				msg = "yandex: this video requires an authenticated Yandex session (SESSION_REQUIRED)"
+			} else {
+				msg = fmt.Sprintf("yandex: this video requires an authenticated Yandex session (SESSION_REQUIRED): %s", msg)
+			}
+		default:
+			if msg == "" {
+				msg = fmt.Sprintf("yandex: translation not ready or failed (status=%d, empty url)", status)
+			} else {
+				msg = fmt.Sprintf("yandex: translation not ready or failed (status=%d): %s", status, msg)
+			}
 		}
+
 		return backend.TranslateResult{}, errors.New(msg)
 	}
 
