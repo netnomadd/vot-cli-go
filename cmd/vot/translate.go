@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -13,15 +14,28 @@ import (
 	"github.com/netnomadd/vot-cli-go/internal/yandexclient"
 )
 
-// messages holds localized user-facing strings for the translate command.
+// messages holds localized user-facing strings.
 type messages struct {
-	UsageTranslate    string
-	RespLangRequired  string
-	InvalidVoiceStyle string
-	ErrorPrefix       string
+	// Root-level help
+	UsageRoot           string
+	CommandsHeader      string
+	CommandTranslate    string
+	GlobalOptionsHeader string
+	HelpHint            string
+
+	// Translate command
+	UsageTranslate        string
+	RespLangRequired      string
+	InvalidVoiceStyle     string
+	PollIntervalTooSmall  string
+	PollAttemptsInvalid   string
+	FailedLoadConfigFmt   string
+	UnknownBackendFmt     string
+	UnknownCommandFmt     string
+	ErrorPrefix           string
 }
 
-// getMessages returns localized messages based on --lang flag or VOT_LANG.
+// getMessages returns localized messages based on --lang flag, VOT_LANG or CLI args.
 func getMessages() messages {
 	lang := flagLang
 	if lang == "" {
@@ -29,21 +43,58 @@ func getMessages() messages {
 			lang = v
 		}
 	}
+	// Fallback: parse --lang from os.Args (works even before flags are parsed).
+	if lang == "" {
+		args := os.Args[1:]
+		for i := 0; i < len(args); i++ {
+			arg := args[i]
+			if strings.HasPrefix(arg, "--lang=") {
+				lang = strings.TrimPrefix(arg, "--lang=")
+				break
+			}
+			if arg == "--lang" && i+1 < len(args) {
+				lang = args[i+1]
+				break
+			}
+		}
+	}
 
 	switch lang {
 	case "ru":
 		return messages{
-			UsageTranslate:    "использование: vot translate [опции] <url> [url2 ...]",
-			RespLangRequired:  "--response-lang обязателен",
-			InvalidVoiceStyle: "--voice-style может быть только 'live' или 'tts'",
-			ErrorPrefix:       "ошибка",
+			UsageRoot:           "использование: vot [глобальные опции] <команда> [опции] [аргументы...]",
+			CommandsHeader:      "команды:",
+			CommandTranslate:    "translate   перевод видео и вывод ссылки(ок) на аудио",
+			GlobalOptionsHeader: "глобальные опции:",
+			HelpHint:            "запустите 'vot <команда> --help' для справки по опциям команды",
+
+			UsageTranslate:       "использование: vot translate [опции] <url> [url2 ...]",
+			RespLangRequired:     "--response-lang обязателен",
+			InvalidVoiceStyle:    "--voice-style может быть только 'live' или 'tts'",
+			PollIntervalTooSmall: "--poll-interval должен быть не менее 30 секунд",
+			PollAttemptsInvalid:  "--poll-attempts должен быть положительным числом",
+			FailedLoadConfigFmt:  "не удалось загрузить конфиг: %v",
+			UnknownBackendFmt:    "неизвестный backend '%s' (ожидается 'direct' или 'worker')",
+			UnknownCommandFmt:    "неизвестная команда: %s",
+			ErrorPrefix:          "ошибка",
 		}
 	default:
 		return messages{
-			UsageTranslate:    "usage: vot translate [options] <url> [url2 ...]",
-			RespLangRequired:  "--response-lang is required",
-			InvalidVoiceStyle: "--voice-style must be 'live' or 'tts'",
-			ErrorPrefix:       "error",
+			UsageRoot:           "usage: vot [global options] <command> [options] [args...]",
+			CommandsHeader:      "commands:",
+			CommandTranslate:    "translate   translate video and print audio URL(s)",
+			GlobalOptionsHeader: "global options:",
+			HelpHint:            "run 'vot <command> --help' for command-specific options",
+
+			UsageTranslate:       "usage: vot translate [options] <url> [url2 ...]",
+			RespLangRequired:     "--response-lang is required",
+			InvalidVoiceStyle:    "--voice-style must be 'live' or 'tts'",
+			PollIntervalTooSmall: "--poll-interval must be at least 30 seconds",
+			PollAttemptsInvalid:  "--poll-attempts must be positive",
+			FailedLoadConfigFmt:  "failed to load config: %v",
+			UnknownBackendFmt:    "unknown backend '%s' (expected 'direct' or 'worker')",
+			UnknownCommandFmt:    "unknown command: %s",
+			ErrorPrefix:          "error",
 		}
 	}
 }
@@ -55,6 +106,12 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 	// Reuse global flags in this subcommand (parsed first)
 	fs.AddFlagSet(parent)
+
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, msg.UsageTranslate)
+		fmt.Fprintln(os.Stderr, "\noptions:")
+		fs.PrintDefaults()
+	}
 
 	var (
 		flagReqLang      string
@@ -81,7 +138,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 	urls := fs.Args()
 	if len(urls) == 0 {
-		fmt.Fprintln(os.Stderr, msg.UsageTranslate)
+		fs.Usage()
 		os.Exit(1)
 	}
 
@@ -134,7 +191,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		}
 		client = c
 	default:
-		fmt.Fprintf(os.Stderr, "%s: unknown backend '%s' (expected 'direct' or 'worker')\n", msg.ErrorPrefix, flagBackend)
+		fmt.Fprintf(os.Stderr, "%s: "+msg.UnknownBackendFmt+"\n", msg.ErrorPrefix, flagBackend)
 		os.Exit(1)
 	}
 
