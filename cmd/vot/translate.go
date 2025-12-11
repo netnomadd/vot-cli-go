@@ -24,15 +24,15 @@ type messages struct {
 	HelpHint            string
 
 	// Translate command
-	UsageTranslate        string
-	RespLangRequired      string
-	InvalidVoiceStyle     string
-	PollIntervalTooSmall  string
-	PollAttemptsInvalid   string
-	FailedLoadConfigFmt   string
-	UnknownBackendFmt     string
-	UnknownCommandFmt     string
-	ErrorPrefix           string
+	UsageTranslate       string
+	RespLangRequired     string
+	InvalidVoiceStyle    string
+	PollIntervalTooSmall string
+	PollAttemptsInvalid  string
+	FailedLoadConfigFmt  string
+	UnknownBackendFmt    string
+	UnknownCommandFmt    string
+	ErrorPrefix          string
 }
 
 // getMessages returns localized messages based on --lang flag, VOT_LANG or CLI args.
@@ -153,23 +153,45 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	}
 
 	if flagPollInterval < 30 {
-		fmt.Fprintln(os.Stderr, "--poll-interval must be at least 30 seconds")
+		fmt.Fprintln(os.Stderr, msg.PollIntervalTooSmall)
 		os.Exit(1)
 	}
 
 	if flagPollAttempts <= 0 {
-		fmt.Fprintln(os.Stderr, "--poll-attempts must be positive")
+		fmt.Fprintln(os.Stderr, msg.PollAttemptsInvalid)
 		os.Exit(1)
 	}
 
 	// Load configuration (if any) and initialise direct backend client.
 	cfg, cfgPath, err := config.Load(flagConfig)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		fmt.Fprintf(os.Stderr, msg.FailedLoadConfigFmt+"\n", err)
 		os.Exit(1)
 	}
 	if flagDebug && !flagSilent && cfgPath != "" {
 		fmt.Fprintf(os.Stderr, "[debug] using config file: %s\n", cfgPath)
+	}
+
+	// Environment variables override config file values when set.
+	if ua := os.Getenv("VOT_USER_AGENT"); ua != "" {
+		cfg.UserAgent = ua
+	}
+	if h := os.Getenv("VOT_YANDEX_HMAC_KEY"); h != "" {
+		cfg.YandexHMACKey = h
+	}
+	if t := os.Getenv("VOT_YANDEX_TOKEN"); t != "" {
+		cfg.YandexToken = t
+	}
+	if flagDebug && !flagSilent {
+		if os.Getenv("VOT_USER_AGENT") != "" {
+			fmt.Fprintln(os.Stderr, "[debug] using User-Agent from VOT_USER_AGENT")
+		}
+		if os.Getenv("VOT_YANDEX_HMAC_KEY") != "" {
+			fmt.Fprintln(os.Stderr, "[debug] using HMAC key from VOT_YANDEX_HMAC_KEY")
+		}
+		if os.Getenv("VOT_YANDEX_TOKEN") != "" {
+			fmt.Fprintln(os.Stderr, "[debug] using API token from VOT_YANDEX_TOKEN")
+		}
 	}
 
 	var client backend.Client
