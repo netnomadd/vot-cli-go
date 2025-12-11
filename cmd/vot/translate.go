@@ -61,15 +61,13 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		flagRespLang   string
 		flagDirectURL  bool
 		flagSubsURL    string
-		flagM3U8       bool
 		flagVoiceStyle string
 	)
 
 	fs.StringVarP(&flagReqLang, "request-lang", "s", "", "source language code (empty = auto)")
 	fs.StringVarP(&flagRespLang, "response-lang", "t", "", "target language code (required)")
-	fs.BoolVar(&flagDirectURL, "direct-url", false, "treat input URL(s) as direct media URLs (mp4/webm/m3u8)")
+	fs.BoolVar(&flagDirectURL, "direct-url", false, "treat input URL(s) as direct media URLs (mp4/webm)")
 	fs.StringVar(&flagSubsURL, "subs-url", "", "direct subtitles URL to pass as translation help")
-	fs.BoolVar(&flagM3U8, "m3u8", false, "treat input URL(s) as stream (m3u8) and request stream translation")
 	fs.StringVar(&flagVoiceStyle, "voice-style", "live", "voice style: live (default) or tts")
 
 	if err := fs.Parse(args); err != nil {
@@ -136,25 +134,8 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 
 		if flagDebug && !flagSilent {
-			fmt.Fprintf(os.Stderr, "[debug] url=%s req_lang=%s resp_lang=%s direct=%v m3u8=%v voice_style=%s subs_url=%s\n",
-				u, flagReqLang, flagRespLang, flagDirectURL, flagM3U8, flagVoiceStyle, flagSubsURL)
-		}
-
-		if flagM3U8 {
-			// Stream translation: input URL is treated as stream source (e.g. m3u8).
-			res, err := client.TranslateStream(ctx, backend.StreamParams{
-				URL:          u,
-				RequestLang:  flagReqLang,
-				ResponseLang: flagRespLang,
-			})
-			cancel()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", msg.ErrorPrefix, err)
-				exitCode = 1
-				continue
-			}
-			fmt.Fprintln(os.Stdout, res.StreamURL)
-			continue
+			fmt.Fprintf(os.Stderr, "[debug] url=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s\n",
+				u, flagReqLang, flagRespLang, flagDirectURL, flagVoiceStyle, flagSubsURL)
 		}
 
 		// Regular video translation.
