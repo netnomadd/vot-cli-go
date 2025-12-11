@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -88,54 +90,90 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 
 	const defaultDuration = 343.0
 
-	body, err := c.encodeTranslationRequest(p.URL, defaultDuration, p.RequestLang, p.ResponseLang, p)
-	if err != nil {
-		return backend.TranslateResult{}, err
+	interval := time.Duration(p.PollIntervalSec) * time.Second
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	if interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+
+	attempts := p.PollAttempts
+	if attempts <= 0 {
+		attempts = 10
 	}
 
 	path := "/video-translation/translate"
-	vtransHeaders := c.secYaHeaders("Vtrans", sess, body, path)
 
-	resBytes, err := c.doWorkerProtoRequest(ctx, path, body, vtransHeaders)
-	if err != nil {
-		return backend.TranslateResult{}, err
-	}
+	for attempt := 0; attempt < attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return backend.TranslateResult{}, err
+		}
 
-	var resp yandexproto.VideoTranslationResponse
-	if err := proto.Unmarshal(resBytes, &resp); err != nil {
-		return backend.TranslateResult{}, err
-	}
+		body, err := c.encodeTranslationRequest(p.URL, defaultDuration, p.RequestLang, p.ResponseLang, p)
+		if err != nil {
+			return backend.TranslateResult{}, err
+		}
 
-	url := resp.GetUrl()
-	if url == "" {
+		vtransHeaders := c.secYaHeaders("Vtrans", sess, body, path)
+
+		resBytes, err := c.doWorkerProtoRequest(ctx, path, body, vtransHeaders)
+		if err != nil {
+			return backend.TranslateResult{}, err
+		}
+
+		var resp yandexproto.VideoTranslationResponse
+		if err := proto.Unmarshal(resBytes, &resp); err != nil {
+			return backend.TranslateResult{}, err
+		}
+
 		status := resp.GetStatus()
 		remaining := resp.GetRemainingTime()
+		if p.Debug {
+			fmt.Fprintf(os.Stderr, "[debug] [worker] poll attempt %d/%d status=%d remaining=%d\n", attempt+1, attempts, status, remaining)
+		}
+
+		url := resp.GetUrl()
+		if url != "" {
+			return backend.TranslateResult{
+				AudioURL:      url,
+				Duration:      resp.GetDuration(),
+				DetectedLang:  resp.GetLanguage(),
+				IsLivelyVoice: resp.GetIsLivelyVoice(),
+			}, nil
+		}
+
 		msg := resp.GetMessage()
 
+		retry := false
 		switch status {
-		case 2, 3: // WAITING / LONG_WAITING
-			if remaining > 0 {
-				if msg == "" {
-					msg = "yandex: translation is in progress via worker"
-				}
-			} else if msg == "" {
-				msg = "yandex: translation is in progress via worker (no ETA)"
-			}
+		case 2, 3, 6: // WAITING / LONG_WAITING / AUDIO_REQUESTED
+			retry = true
 		default:
 			if msg == "" {
 				msg = "yandex: translation not ready or failed (worker, empty url)"
 			}
 		}
 
-		return backend.TranslateResult{}, errors.New(msg)
+		if !retry || attempt == attempts-1 {
+			if retry {
+				if remaining > 0 {
+					msg = fmt.Sprintf("yandex: translation still in progress via worker after %d attempts (remaining ~%d seconds)", attempts, remaining)
+				} else if msg == "" {
+					msg = fmt.Sprintf("yandex: translation still in progress via worker after %d attempts", attempts)
+				}
+			}
+			return backend.TranslateResult{}, errors.New(msg)
+		}
+
+		select {
+		case <-ctx.Done():
+			return backend.TranslateResult{}, ctx.Err()
+		case <-time.After(interval):
+		}
 	}
 
-	return backend.TranslateResult{
-		AudioURL:      url,
-		Duration:      resp.GetDuration(),
-		DetectedLang:  resp.GetLanguage(),
-		IsLivelyVoice: resp.GetIsLivelyVoice(),
-	}, nil
+	return backend.TranslateResult{}, errors.New("yandex: translation not ready after polling (worker)")
 }
 
 // TranslateStream mirrors DirectClient.TranslateStream but uses the worker

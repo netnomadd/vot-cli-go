@@ -24,6 +24,14 @@ type TranslateParams struct {
 	BypassCache  bool
 	WasStream    bool
 	VideoTitle   string
+
+	// Polling configuration (seconds between attempts, number of attempts).
+	// If zero or negative, backends fall back to their defaults.
+	PollIntervalSec int
+	PollAttempts    int
+
+	// Debug enables verbose backend-level logging (wired from CLI --debug).
+	Debug bool
 }
 
 // TranslateResult contains essential data returned from a video translation.

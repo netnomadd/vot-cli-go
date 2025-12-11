@@ -57,11 +57,13 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	fs.AddFlagSet(parent)
 
 	var (
-		flagReqLang    string
-		flagRespLang   string
-		flagDirectURL  bool
-		flagSubsURL    string
-		flagVoiceStyle string
+		flagReqLang      string
+		flagRespLang     string
+		flagDirectURL    bool
+		flagSubsURL      string
+		flagVoiceStyle   string
+		flagPollInterval int
+		flagPollAttempts int
 	)
 
 	fs.StringVarP(&flagReqLang, "request-lang", "s", "", "source language code (empty = auto)")
@@ -69,6 +71,8 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	fs.BoolVar(&flagDirectURL, "direct-url", false, "treat input URL(s) as direct media URLs (mp4/webm)")
 	fs.StringVar(&flagSubsURL, "subs-url", "", "direct subtitles URL to pass as translation help")
 	fs.StringVar(&flagVoiceStyle, "voice-style", "live", "voice style: live (default) or tts")
+	fs.IntVar(&flagPollInterval, "poll-interval", 30, "polling interval in seconds (min 30)")
+	fs.IntVar(&flagPollAttempts, "poll-attempts", 10, "maximum number of polling attempts")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -88,6 +92,16 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 	if flagVoiceStyle != "live" && flagVoiceStyle != "tts" {
 		fmt.Fprintln(os.Stderr, msg.InvalidVoiceStyle)
+		os.Exit(1)
+	}
+
+	if flagPollInterval < 30 {
+		fmt.Fprintln(os.Stderr, "--poll-interval must be at least 30 seconds")
+		os.Exit(1)
+	}
+
+	if flagPollAttempts <= 0 {
+		fmt.Fprintln(os.Stderr, "--poll-attempts must be positive")
 		os.Exit(1)
 	}
 
@@ -131,21 +145,26 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 	exitCode := 0
 	for _, u := range urls {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		// Allow enough time for polling: interval * attempts + small overhead.
+		pollTimeout := time.Duration(flagPollInterval*flagPollAttempts+30) * time.Second
+		ctx, cancel := context.WithTimeout(context.Background(), pollTimeout)
 
 		if flagDebug && !flagSilent {
-			fmt.Fprintf(os.Stderr, "[debug] url=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s\n",
-				u, flagReqLang, flagRespLang, flagDirectURL, flagVoiceStyle, flagSubsURL)
+			fmt.Fprintf(os.Stderr, "[debug] url=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d\n",
+				u, flagReqLang, flagRespLang, flagDirectURL, flagVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts)
 		}
 
 		// Regular video translation.
 		res, err := client.TranslateVideo(ctx, backend.TranslateParams{
-			URL:          u,
-			RequestLang:  flagReqLang,
-			ResponseLang: flagRespLang,
-			DirectURL:    flagDirectURL,
-			SubsURL:      flagSubsURL,
-			VoiceStyle:   voiceStyle,
+			URL:             u,
+			RequestLang:     flagReqLang,
+			ResponseLang:    flagRespLang,
+			DirectURL:       flagDirectURL,
+			SubsURL:         flagSubsURL,
+			VoiceStyle:      voiceStyle,
+			PollIntervalSec: flagPollInterval,
+			PollAttempts:    flagPollAttempts,
+			Debug:           flagDebug,
 		})
 		cancel()
 		if err != nil {
