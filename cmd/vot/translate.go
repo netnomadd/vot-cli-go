@@ -13,8 +13,44 @@ import (
 	"github.com/netnomadd/vot-cli-go/internal/yandexclient"
 )
 
+// messages holds localized user-facing strings for the translate command.
+type messages struct {
+	UsageTranslate     string
+	RespLangRequired   string
+	InvalidVoiceStyle  string
+	ErrorPrefix        string
+}
+
+// getMessages returns localized messages based on --lang flag or VOT_LANG.
+func getMessages() messages {
+	lang := flagLang
+	if lang == "" {
+		if v := os.Getenv("VOT_LANG"); v != "" {
+			lang = v
+		}
+	}
+
+	switch lang {
+	case "ru":
+		return messages{
+			UsageTranslate:    "использование: vot translate [опции] <url> [url2 ...]",
+			RespLangRequired:  "--response-lang обязателен",
+			InvalidVoiceStyle: "--voice-style может быть только 'live' или 'tts'",
+			ErrorPrefix:       "ошибка",
+		}
+	default:
+		return messages{
+			UsageTranslate:    "usage: vot translate [options] <url> [url2 ...]",
+			RespLangRequired:  "--response-lang is required",
+			InvalidVoiceStyle: "--voice-style must be 'live' or 'tts'",
+			ErrorPrefix:       "error",
+		}
+	}
+}
+
 // translateMain handles `vot translate` subcommand.
 func translateMain(parent *flag.FlagSet, args []string) {
+	msg := getMessages()
 	fs := flag.NewFlagSet("translate", flag.ExitOnError)
 
 	// Reuse global flags in this subcommand (parsed first)
@@ -43,17 +79,17 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 	urls := fs.Args()
 	if len(urls) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: vot translate [options] <url> [url2 ...]")
+		fmt.Fprintln(os.Stderr, msg.UsageTranslate)
 		os.Exit(1)
 	}
 
 	if flagRespLang == "" {
-		fmt.Fprintln(os.Stderr, "--response-lang is required")
+		fmt.Fprintln(os.Stderr, msg.RespLangRequired)
 		os.Exit(1)
 	}
 
 	if flagVoiceStyle != "live" && flagVoiceStyle != "tts" {
-		fmt.Fprintln(os.Stderr, "--voice-style must be 'live' or 'tts'")
+		fmt.Fprintln(os.Stderr, msg.InvalidVoiceStyle)
 		os.Exit(1)
 	}
 
@@ -97,7 +133,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			})
 			cancel()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				fmt.Fprintf(os.Stderr, "%s: %v\n", msg.ErrorPrefix, err)
 				exitCode = 1
 				continue
 			}
@@ -116,7 +152,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		})
 		cancel()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s: %v\n", msg.ErrorPrefix, err)
 			exitCode = 1
 			continue
 		}
