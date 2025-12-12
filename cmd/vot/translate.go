@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,6 +35,8 @@ type messages struct {
 	FailedLoadConfigFmt  string
 	UnknownBackendFmt    string
 	UnknownCommandFmt    string
+	TimeoutErrorFmt      string
+	CanceledError        string
 	ErrorPrefix          string
 }
 
@@ -78,6 +81,8 @@ func getMessages() messages {
 			FailedLoadConfigFmt:  "не удалось загрузить конфиг: %v",
 			UnknownBackendFmt:    "неизвестный backend '%s' (ожидается 'direct' или 'worker')",
 			UnknownCommandFmt:    "неизвестная команда: %s",
+			TimeoutErrorFmt:      "перевод не завершился за %d секунд; попробуйте увеличить --poll-attempts или --poll-interval",
+			CanceledError:        "перевод отменён",
 			ErrorPrefix:          "ошибка",
 		}
 	default:
@@ -96,6 +101,8 @@ func getMessages() messages {
 			FailedLoadConfigFmt:  "failed to load config: %v",
 			UnknownBackendFmt:    "unknown backend '%s' (expected 'direct' or 'worker')",
 			UnknownCommandFmt:    "unknown command: %s",
+			TimeoutErrorFmt:      "translation timed out after %d seconds; try increasing --poll-attempts or --poll-interval",
+			CanceledError:        "translation canceled",
 			ErrorPrefix:          "error",
 		}
 	}
@@ -116,14 +123,14 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	}
 
 	var (
-		flagReqLang          string
-		flagRespLang         string
-		flagDirectURL        bool
-		flagSubsURL          string
-		flagVoiceStyle       string
-		flagPollInterval     int
-		flagPollAttempts     int
-		flagUseYtDLP         bool
+		flagReqLang           string
+		flagRespLang          string
+		flagDirectURL         bool
+		flagSubsURL           string
+		flagVoiceStyle        string
+		flagPollInterval      int
+		flagPollAttempts      int
+		flagUseYtDLP          bool
 		flagYtDLPUseDirectURL bool
 	)
 
@@ -284,7 +291,13 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		})
 		cancel()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", msg.ErrorPrefix, err)
+			if errors.Is(err, context.DeadlineExceeded) {
+				fmt.Fprintf(os.Stderr, "%s: "+msg.TimeoutErrorFmt+"\n", msg.ErrorPrefix, int(pollTimeout.Seconds()))
+			} else if errors.Is(err, context.Canceled) {
+				fmt.Fprintf(os.Stderr, "%s: %s\n", msg.ErrorPrefix, msg.CanceledError)
+			} else {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", msg.ErrorPrefix, err)
+			}
 			exitCode = 1
 			continue
 		}
