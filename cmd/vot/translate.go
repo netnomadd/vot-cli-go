@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,13 +116,15 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	}
 
 	var (
-		flagReqLang      string
-		flagRespLang     string
-		flagDirectURL    bool
-		flagSubsURL      string
-		flagVoiceStyle   string
-		flagPollInterval int
-		flagPollAttempts int
+		flagReqLang          string
+		flagRespLang         string
+		flagDirectURL        bool
+		flagSubsURL          string
+		flagVoiceStyle       string
+		flagPollInterval     int
+		flagPollAttempts     int
+		flagUseYtDLP         bool
+		flagYtDLPUseDirectURL bool
 	)
 
 	fs.StringVarP(&flagReqLang, "request-lang", "s", "", "source language code (empty = auto)")
@@ -130,6 +134,8 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	fs.StringVar(&flagVoiceStyle, "voice-style", "live", "voice style: live (default) or tts")
 	fs.IntVar(&flagPollInterval, "poll-interval", 30, "polling interval in seconds (min 30)")
 	fs.IntVar(&flagPollAttempts, "poll-attempts", 10, "maximum number of polling attempts")
+	fs.BoolVar(&flagUseYtDLP, "use-yt-dlp", false, "use yt-dlp (if available) to assist with URL handling")
+	fs.BoolVar(&flagYtDLPUseDirectURL, "yt-dlp-use-direct-url", false, "when using yt-dlp, pass its direct media URL to backend instead of original URL")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -194,6 +200,17 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		}
 	}
 
+	// Effective yt-dlp settings: config provides defaults, CLI flags can override.
+	useYtDLP := cfg != nil && cfg.UseYtDLP
+	ytDLPUseDirectURL := cfg != nil && cfg.YtDLPUseDirectURL
+
+	if f := fs.Lookup("use-yt-dlp"); f != nil && f.Changed {
+		useYtDLP = flagUseYtDLP
+	}
+	if f := fs.Lookup("yt-dlp-use-direct-url"); f != nil && f.Changed {
+		ytDLPUseDirectURL = flagYtDLPUseDirectURL
+	}
+
 	var client backend.Client
 	switch flagBackend {
 	case "direct", "":
@@ -229,16 +246,36 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		ctx, cancel := context.WithTimeout(context.Background(), pollTimeout)
 
 		if flagDebug && !flagSilent {
-			fmt.Fprintf(os.Stderr, "[debug] url=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d\n",
-				u, flagReqLang, flagRespLang, flagDirectURL, flagVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts)
+			fmt.Fprintf(os.Stderr, "[debug] url=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v\n",
+				u, flagReqLang, flagRespLang, flagDirectURL, flagVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLP, ytDLPUseDirectURL)
+		}
+
+		effectiveURL := u
+		effectiveDirect := flagDirectURL
+
+		// Optionally use yt-dlp to resolve a direct media URL.
+		if useYtDLP {
+			if directURL, err := resolveDirectURLWithYtDLP(u); err != nil {
+				if flagDebug && !flagSilent {
+					fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolution failed for %s: %v\n", u, err)
+				}
+			} else {
+				if flagDebug && !flagSilent {
+					fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolved %s -> %s\n", u, directURL)
+				}
+				if ytDLPUseDirectURL {
+					effectiveURL = directURL
+					effectiveDirect = true
+				}
+			}
 		}
 
 		// Regular video translation.
 		res, err := client.TranslateVideo(ctx, backend.TranslateParams{
-			URL:             u,
+			URL:             effectiveURL,
 			RequestLang:     flagReqLang,
 			ResponseLang:    flagRespLang,
-			DirectURL:       flagDirectURL,
+			DirectURL:       effectiveDirect,
 			SubsURL:         flagSubsURL,
 			VoiceStyle:      voiceStyle,
 			PollIntervalSec: flagPollInterval,
@@ -256,4 +293,67 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	}
 
 	os.Exit(exitCode)
+}
+
+// resolveDirectURLWithYtDLP tries to obtain a direct media URL for the given
+// video URL using the local yt-dlp binary (if present in PATH).
+func resolveDirectURLWithYtDLP(videoURL string) (string, error) {
+	if _, err := exec.LookPath("yt-dlp"); err != nil {
+		return "", fmt.Errorf("yt-dlp not found in PATH: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "yt-dlp", "-g", videoURL)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("yt-dlp failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+	}
+
+	text := strings.TrimSpace(string(output))
+	if text == "" {
+		return "", fmt.Errorf("yt-dlp returned empty output")
+	}
+
+	// yt-dlp -g can return multiple lines; we use the first one.
+	if idx := strings.IndexByte(text, '\n'); idx >= 0 {
+		text = text[:idx]
+	}
+
+	return text, nil
+}
+
+// getVideoDurationWithYtDLP asks yt-dlp to print video duration (in seconds)
+// for the given URL and parses it into float64.
+func getVideoDurationWithYtDLP(videoURL string) (float64, error) {
+	if _, err := exec.LookPath("yt-dlp"); err != nil {
+		return 0, fmt.Errorf("yt-dlp not found in PATH: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "yt-dlp", "--print", "duration", videoURL)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("yt-dlp failed to get duration: %w (output: %s)", err, strings.TrimSpace(string(output)))
+	}
+
+	line := strings.TrimSpace(string(output))
+	if line == "" {
+		return 0, fmt.Errorf("yt-dlp returned empty duration")
+	}
+
+	// yt-dlp can theoretically print multiple lines; use the first.
+	if idx := strings.IndexByte(line, '\n'); idx >= 0 {
+		line = line[:idx]
+	}
+
+	sec, err := strconv.ParseFloat(line, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse yt-dlp duration %q: %w", line, err)
+	}
+
+	return sec, nil
 }

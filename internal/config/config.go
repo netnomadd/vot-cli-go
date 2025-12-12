@@ -8,11 +8,16 @@ import (
 
 // Config represents user-level configuration for vot-cli-go.
 // Fields are intentionally minimal and map directly to what
-// Yandex direct backend needs.
+// Yandex-related backends and helpers need.
 type Config struct {
 	UserAgent     string `json:"user_agent"`
 	YandexHMACKey string `json:"yandex_hmac_key"`
 	YandexToken   string `json:"yandex_token"`
+
+	// Optional integration with yt-dlp (if installed in the system).
+	// These flags only take effect in features that explicitly support yt-dlp.
+	UseYtDLP          bool `json:"use_yt_dlp"`
+	YtDLPUseDirectURL bool `json:"yt_dlp_use_direct_url"`
 }
 
 // DefaultPath returns the OS-specific default path to config.json.

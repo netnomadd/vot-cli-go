@@ -103,10 +103,13 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		return backend.TranslateResult{}, err
 	}
 
-	// Build request body
-	// Duration is not known here, use JS default (343s)
+	// Build request body. If caller provided a known duration (e.g. via
+	// yt-dlp), prefer it over the JS default (343s).
 	const defaultDuration = 343.0
 	dur := defaultDuration
+	if p.DurationSec > 0 {
+		dur = p.DurationSec
+	}
 
 	interval := time.Duration(p.PollIntervalSec) * time.Second
 	if interval <= 0 {

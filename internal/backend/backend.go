@@ -25,6 +25,10 @@ type TranslateParams struct {
 	WasStream    bool
 	VideoTitle   string
 
+	// Optional known duration of the video in seconds. If zero or negative,
+	// backends fall back to their internal default (e.g. 343s).
+	DurationSec float64
+
 	// Polling configuration (seconds between attempts, number of attempts).
 	// If zero or negative, backends fall back to their defaults.
 	PollIntervalSec int

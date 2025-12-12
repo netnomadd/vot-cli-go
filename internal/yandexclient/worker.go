@@ -89,6 +89,10 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 	}
 
 	const defaultDuration = 343.0
+	dur := defaultDuration
+	if p.DurationSec > 0 {
+		dur = p.DurationSec
+	}
 
 	interval := time.Duration(p.PollIntervalSec) * time.Second
 	if interval <= 0 {
@@ -110,7 +114,7 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 			return backend.TranslateResult{}, err
 		}
 
-		body, err := c.encodeTranslationRequest(p.URL, defaultDuration, p.RequestLang, p.ResponseLang, p)
+		body, err := c.encodeTranslationRequest(p.URL, dur, p.RequestLang, p.ResponseLang, p)
 		if err != nil {
 			return backend.TranslateResult{}, err
 		}
@@ -149,9 +153,17 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		switch status {
 		case 2, 3, 6: // WAITING / LONG_WAITING / AUDIO_REQUESTED
 			retry = true
+		case 7: // SESSION_REQUIRED – requires authenticated Yandex session
+			if msg == "" {
+				msg = "yandex: this video requires an authenticated Yandex session (worker, SESSION_REQUIRED)"
+			} else {
+				msg = fmt.Sprintf("yandex: this video requires an authenticated Yandex session (worker, SESSION_REQUIRED): %s", msg)
+			}
 		default:
 			if msg == "" {
-				msg = "yandex: translation not ready or failed (worker, empty url)"
+				msg = fmt.Sprintf("yandex: translation not ready or failed via worker (status=%d, empty url)", status)
+			} else {
+				msg = fmt.Sprintf("yandex: translation not ready or failed via worker (status=%d): %s", status, msg)
 			}
 		}
 

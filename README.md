@@ -39,7 +39,9 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
 - `--subs-url` — прямая ссылка на субтитры, которые передаются как подсказка для перевода;
 - `--backend` — `direct` или `worker`;
 - `--poll-interval` — интервал между запросами статуса (секунды, минимум 30);
-- `--poll-attempts` — максимальное количество попыток опроса.
+- `--poll-attempts` — максимальное количество попыток опроса;
+- `--use-yt-dlp` — использовать локальный `yt-dlp` (если доступен в `PATH`) для получения прямых медиассылок и метаданных (в том числе длительности ролика);
+- `--yt-dlp-use-direct-url` — при использовании `yt-dlp` передавать в backend прямой медиa-URL, а не оригинальный адрес страницы.
 
 Флаги верхнего уровня:
 
@@ -63,13 +65,17 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
 {
   "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... YaBrowser/25.4.0.0 Safari/537.36",
   "yandex_hmac_key": "bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf",
-  "yandex_token": "ya-oauth-token-for-lively-voice-if-needed"
+  "yandex_token": "ya-oauth-token-for-lively-voice-if-needed",
+  "use_yt_dlp": true,
+  "yt_dlp_use_direct_url": true
 }
 ```
 
 - `user_agent` — User-Agent, который будет использован в запросах к Яндексу/worker’у;
 - `yandex_hmac_key` — ключ для HMAC-подписи `Sec-*` заголовков (по умолчанию прошит в бинарник);
-- `yandex_token` — OAuth-токен Яндекса, используемый для живых голосов (Lively Voice), если задан.
+- `yandex_token` — OAuth-токен Яндекса, используемый для живых голосов (Lively Voice), если задан;
+- `use_yt_dlp` — при `true` CLI может использовать локально установленный `yt-dlp` (если он найден в `PATH`) для получения прямых медиассылок/метаданных;
+- `yt_dlp_use_direct_url` — при `true` backends получают уже «распакованный» прямой URL от `yt-dlp`, при `false` — исходный URL (напр. страница YouTube).
 
 ### Переопределение через переменные окружения
 
@@ -87,6 +93,14 @@ export VOT_YANDEX_TOKEN="ya-0.AQA..."
 
 vot translate --response-lang=ru "https://youtu.be/..."
 ```
+
+## Интеграция с `yt-dlp`
+
+При включённой опции `use_yt_dlp` (через конфиг или флаг `--use-yt-dlp`) утилита, если находит `yt-dlp` в `PATH`, сначала вызывает его для переданного URL.
+Из вывода берутся как минимум прямой медиa-URL и длительность ролика; длительность дополнительно отправляется в backend (direct/worker), что помогает сервису точнее оценивать объём работы и таймауты.
+Если включён `yt_dlp_use_direct_url` (или флаг `--yt-dlp-use-direct-url`), в запрос к backend уходит уже «распакованный» медиa-URL; иначе — исходный адрес страницы (YouTube, Invidious и т.п.).
+Если `yt-dlp` не найден или завершается с ошибкой, утилита продолжает работу как без него.
+Обратите внимание, что backend’ы `direct` и `worker` не гарантируют поддержку любых прямых медиассылок: часть URL'ов может не приниматься или обрабатываться с ошибкой.
 
 ## Отличия backend'ов `direct` и `worker`
 
