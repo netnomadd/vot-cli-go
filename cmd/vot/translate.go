@@ -303,6 +303,17 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		}
 
 		fmt.Fprintln(os.Stdout, res.AudioURL)
+		if flagDebug && !flagSilent {
+			detected := res.DetectedLang
+			if detected == "" {
+				detected = "unknown"
+			}
+			requested := flagReqLang
+			if requested == "" {
+				requested = "auto"
+			}
+			fmt.Fprintf(os.Stderr, "[debug] detected_lang=%s (request=%s) duration=%.1fs lively_voice=%v\n", detected, requested, res.Duration, res.IsLivelyVoice)
+		}
 	}
 
 	os.Exit(exitCode)

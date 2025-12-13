@@ -160,11 +160,16 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 				msg = fmt.Sprintf("yandex: this video requires an authenticated Yandex session (worker, SESSION_REQUIRED): %s", msg)
 			}
 		default:
+			base := ""
 			if msg == "" {
-				msg = fmt.Sprintf("yandex: translation not ready or failed via worker (status=%d, empty url)", status)
+				base = fmt.Sprintf("yandex: translation not ready or failed via worker (status=%d, empty url)", status)
 			} else {
-				msg = fmt.Sprintf("yandex: translation not ready or failed via worker (status=%d): %s", status, msg)
+				base = fmt.Sprintf("yandex: translation not ready or failed via worker (status=%d): %s", status, msg)
 			}
+			if p.DirectURL {
+				base += " (this direct media URL may not be supported; try passing the original page URL or disabling direct-url / yt-dlp direct mode)"
+			}
+			msg = base
 		}
 
 		if !retry || attempt == attempts-1 {
@@ -378,7 +383,10 @@ func (c *WorkerClient) doWorkerProtoRequest(ctx context.Context, path string, bo
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("worker: unexpected status " + resp.Status)
+		if resp.StatusCode == http.StatusForbidden {
+			return nil, fmt.Errorf("worker: unexpected status %s (backend refused the request; this URL, site or direct media link may not be supported)", resp.Status)
+		}
+		return nil, fmt.Errorf("worker: unexpected status %s from backend", resp.Status)
 	}
 
 	return io.ReadAll(resp.Body)
