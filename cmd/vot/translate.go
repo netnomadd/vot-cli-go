@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -211,34 +213,50 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	useYtDLP := cfg != nil && cfg.UseYtDLP
 	ytDLPUseDirectURL := cfg != nil && cfg.YtDLPUseDirectURL
 
+	useYtDLPFlagChanged := false
+	ytDLPDirectFlagChanged := false
+	reqLangFlagChanged := false
+	backendFlagChanged := false
+
 	if f := fs.Lookup("use-yt-dlp"); f != nil && f.Changed {
 		useYtDLP = flagUseYtDLP
+		useYtDLPFlagChanged = true
 	}
 	if f := fs.Lookup("yt-dlp-use-direct-url"); f != nil && f.Changed {
 		ytDLPUseDirectURL = flagYtDLPUseDirectURL
+		ytDLPDirectFlagChanged = true
+	}
+	if f := fs.Lookup("request-lang"); f != nil && f.Changed {
+		reqLangFlagChanged = true
+	}
+	if f := fs.Lookup("backend"); f != nil && f.Changed {
+		backendFlagChanged = true
 	}
 
-	var client backend.Client
+	// Build effective source rules: start with built-ins and then apply optional
+	// overrides/extra rules from config (if any).
+	sourceRules := buildSourceRulesFromConfig(cfg)
+
+	// Validate base backend value early. Source rules may override it per-URL
+	// when the user did not explicitly set --backend.
 	switch flagBackend {
-	case "direct", "":
-		c := yandexclient.NewDirectClient()
-		if cfg != nil {
-			c.SetUserAgent(cfg.UserAgent)
-			c.SetHMACKey(cfg.YandexHMACKey)
-			c.SetAPIToken(cfg.YandexToken)
-		}
-		client = c
-	case "worker":
-		c := yandexclient.NewWorkerClient()
-		if cfg != nil {
-			c.SetUserAgent(cfg.UserAgent)
-			c.SetHMACKey(cfg.YandexHMACKey)
-			c.SetAPIToken(cfg.YandexToken)
-		}
-		client = c
+	case "direct", "", "worker":
 	default:
 		fmt.Fprintf(os.Stderr, "%s: "+msg.UnknownBackendFmt+"\n", msg.ErrorPrefix, flagBackend)
 		os.Exit(1)
+	}
+
+	// Prepare backend clients; per-URL rules may choose between them.
+	directClient := yandexclient.NewDirectClient()
+	workerClient := yandexclient.NewWorkerClient()
+	if cfg != nil {
+		directClient.SetUserAgent(cfg.UserAgent)
+		directClient.SetHMACKey(cfg.YandexHMACKey)
+		directClient.SetAPIToken(cfg.YandexToken)
+
+		workerClient.SetUserAgent(cfg.UserAgent)
+		workerClient.SetHMACKey(cfg.YandexHMACKey)
+		workerClient.SetAPIToken(cfg.YandexToken)
 	}
 
 	voiceStyle := backend.VoiceStyleLive
@@ -252,17 +270,19 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		pollTimeout := time.Duration(flagPollInterval*flagPollAttempts+30) * time.Second
 		ctx, cancel := context.WithTimeout(context.Background(), pollTimeout)
 
-		if flagDebug && !flagSilent {
-			fmt.Fprintf(os.Stderr, "[debug] url=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v\n",
-				u, flagReqLang, flagRespLang, flagDirectURL, flagVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLP, ytDLPUseDirectURL)
-		}
-
 		effectiveURL := u
 		effectiveDirect := flagDirectURL
+		effectiveReqLang := flagReqLang
+		effectiveBackend := flagBackend
 		var durationSec float64
 
+		// Adjust yt-dlp behaviour for this URL based on source-specific rules,
+		// unless the user explicitly overrode the corresponding flags.
+		useYtDLPForURL, ytDLPUseDirectURLForURL := applySourceRules(u, sourceRules, useYtDLP, ytDLPUseDirectURL, useYtDLPFlagChanged, ytDLPDirectFlagChanged)
+		effectiveReqLang, effectiveBackend = applySourceLangAndBackend(u, sourceRules, effectiveReqLang, effectiveBackend, reqLangFlagChanged, backendFlagChanged)
+
 		// Optionally use yt-dlp to resolve a direct media URL and obtain duration.
-		if useYtDLP {
+		if useYtDLPForURL {
 			if d, err := getVideoDurationWithYtDLP(u); err != nil {
 				if flagDebug && !flagSilent {
 					fmt.Fprintf(os.Stderr, "[debug] yt-dlp failed to get duration for %s: %v\n", u, err)
@@ -282,19 +302,46 @@ func translateMain(parent *flag.FlagSet, args []string) {
 				if flagDebug && !flagSilent {
 					fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolved %s -> %s\n", u, directURL)
 				}
-				if ytDLPUseDirectURL {
+				if ytDLPUseDirectURLForURL {
 					effectiveURL = directURL
 					effectiveDirect = true
 				}
 			}
 		}
 
+		sourceKind := classifySource(effectiveURL)
+
+		directForBackend := effectiveDirect
+		if sourceKind == "direct_media" {
+			directForBackend = true
+		}
+
+		// Choose backend client for this URL, allowing per-source rules to
+		// redirect between direct and worker when the user did not override it.
+		var client backend.Client
+		switch effectiveBackend {
+		case "", "direct":
+			client = directClient
+		case "worker":
+			client = workerClient
+		default:
+			fmt.Fprintf(os.Stderr, "%s: "+msg.UnknownBackendFmt+"\n", msg.ErrorPrefix, effectiveBackend)
+			cancel()
+			exitCode = 1
+			continue
+		}
+
+		if flagDebug && !flagSilent {
+			fmt.Fprintf(os.Stderr, "[debug] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v\n",
+				u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, flagVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL)
+		}
+
 		// Regular video translation.
 		res, err := client.TranslateVideo(ctx, backend.TranslateParams{
 			URL:             effectiveURL,
-			RequestLang:     flagReqLang,
+			RequestLang:     effectiveReqLang,
 			ResponseLang:    flagRespLang,
-			DirectURL:       effectiveDirect,
+			DirectURL:       directForBackend,
 			SubsURL:         flagSubsURL,
 			VoiceStyle:      voiceStyle,
 			DurationSec:     durationSec,
@@ -321,7 +368,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			if detected == "" {
 				detected = "unknown"
 			}
-			requested := flagReqLang
+			requested := effectiveReqLang
 			if requested == "" {
 				requested = "auto"
 			}
@@ -421,4 +468,143 @@ func getVideoDurationWithYtDLP(videoURL string) (float64, error) {
 	}
 
 	return sec, nil
+}
+
+// classifySource returns a coarse-grained classification of the given URL
+// (YouTube/Invidious page, direct media, other page, unknown).
+func classifySource(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u == nil {
+		return "unknown"
+	}
+
+	host := strings.ToLower(u.Host)
+	path := strings.ToLower(u.Path)
+
+	if isDirectMediaPath(path) {
+		return "direct_media"
+	}
+
+	if strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be") {
+		return "youtube_page"
+	}
+	if strings.Contains(host, "invidious") || strings.Contains(host, "piped") {
+		return "invidious_page"
+	}
+
+	if host != "" {
+		return "page"
+	}
+	return "unknown"
+}
+
+// isDirectMediaPath reports whether the path looks like a direct media resource
+// (mp4/webm/audio/m3u8/etc.), as opposed to an HTML watch page.
+func isDirectMediaPath(p string) bool {
+	p = strings.ToLower(p)
+	switch {
+	case strings.HasSuffix(p, ".mp4"),
+		strings.HasSuffix(p, ".webm"),
+		strings.HasSuffix(p, ".m4a"),
+		strings.HasSuffix(p, ".m4v"),
+		strings.HasSuffix(p, ".mp3"),
+		strings.HasSuffix(p, ".aac"),
+		strings.HasSuffix(p, ".ogg"),
+		strings.HasSuffix(p, ".opus"),
+		strings.HasSuffix(p, ".ts"),
+		strings.HasSuffix(p, ".m3u8"):
+		return true
+	default:
+		return false
+	}
+}
+
+// sourceRule is an internal compiled representation of a per-source rule
+// from config. All fields are optional except the regexp pattern.
+type sourceRule struct {
+	re                *regexp.Regexp
+	useYtDLP          *bool
+	ytDLPUseDirectURL *bool
+	requestLang       *string
+	backend           *string
+}
+
+// buildSourceRulesFromConfig compiles source rules from config (if any).
+// At the moment we don't ship built-in rules; all behaviour is driven by
+// user config to keep the binary simple and predictable.
+func buildSourceRulesFromConfig(cfg *config.Config) []sourceRule {
+	var rules []sourceRule
+	if cfg == nil {
+		return rules
+	}
+
+	for _, r := range cfg.SourceRules {
+		if r.Pattern == "" {
+			continue
+		}
+		re, err := regexp.Compile(r.Pattern)
+		if err != nil {
+			// Ignore invalid patterns to avoid breaking the CLI.
+			continue
+		}
+		rules = append(rules, sourceRule{
+			re:                re,
+			useYtDLP:          r.UseYtDLP,
+			ytDLPUseDirectURL: r.YtDLPUseDirectURL,
+			requestLang:       r.RequestLang,
+			backend:           r.Backend,
+		})
+	}
+
+	return rules
+}
+
+// applySourceRules adjusts yt-dlp usage flags for a specific URL based on
+// matching source rules. CLI flags take precedence over rules when changed.
+func applySourceRules(rawURL string, rules []sourceRule, baseUseYtDLP, baseYtDLPUseDirectURL bool, useFlagChanged, directFlagChanged bool) (bool, bool) {
+	use := baseUseYtDLP
+	direct := baseYtDLPUseDirectURL
+
+	if len(rules) == 0 {
+		return use, direct
+	}
+
+	for _, r := range rules {
+		if !r.re.MatchString(rawURL) {
+			continue
+		}
+		if !useFlagChanged && r.useYtDLP != nil {
+			use = *r.useYtDLP
+		}
+		if !directFlagChanged && r.ytDLPUseDirectURL != nil {
+			direct = *r.ytDLPUseDirectURL
+		}
+	}
+
+	return use, direct
+}
+
+// applySourceLangAndBackend adjusts request language and backend based on
+// matching source rules. CLI flags again take precedence when explicitly set.
+func applySourceLangAndBackend(rawURL string, rules []sourceRule, baseReqLang, baseBackend string, reqLangFlagChanged, backendFlagChanged bool) (string, string) {
+	reqLang := baseReqLang
+	backend := baseBackend
+
+	if len(rules) == 0 {
+		return reqLang, backend
+	}
+
+	for _, r := range rules {
+		if !r.re.MatchString(rawURL) {
+			continue
+		}
+		if !reqLangFlagChanged && r.requestLang != nil {
+			reqLang = *r.requestLang
+		}
+		if !backendFlagChanged && r.backend != nil {
+			backend = *r.backend
+		}
+	}
+
+	return reqLang, backend
 }

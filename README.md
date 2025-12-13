@@ -100,7 +100,16 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
   "yandex_hmac_key": "bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf",
   "yandex_token": "ya-oauth-token-for-lively-voice-if-needed",
   "use_yt_dlp": true,
-  "yt_dlp_use_direct_url": true
+  "yt_dlp_use_direct_url": true,
+  "source_rules": [
+    {
+      "pattern": "(?i)^https?://www\\.zdf\\.de/play/",
+      "use_yt_dlp": true,
+      "yt_dlp_use_direct_url": true,
+      "request_lang": "de",
+      "backend": "worker"
+    }
+  ]
 }
 ```
 
@@ -108,7 +117,14 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
 - `yandex_hmac_key` — ключ для HMAC-подписи `Sec-*` заголовков (по умолчанию прошит в бинарник);
 - `yandex_token` — OAuth-токен Яндекса, используемый для живых голосов (Lively Voice), если задан;
 - `use_yt_dlp` — при `true` CLI может использовать локально установленный `yt-dlp` (если он найден в `PATH`) для получения прямых медиассылок/метаданных;
-- `yt_dlp_use_direct_url` — при `true` backends получают уже «распакованный» прямой URL от `yt-dlp`, при `false` — исходный URL (напр. страница YouTube).
+- `yt_dlp_use_direct_url` — при `true` backends получают уже «распакованный» прямой URL от `yt-dlp`, при `false` — исходный URL (напр. страница YouTube);
+- `source_rules` — (опционально) массив правил для конкретных источников: каждое правило содержит регулярное выражение `pattern`, флаги `use_yt_dlp`/`yt_dlp_use_direct_url` и, при необходимости, поля `request_lang`/`backend`, позволяя тонко настраивать поведение для разных сайтов без перекомпиляции бинарника.
+
+### Правила источников (`source_rules`)
+
+Правила источников применяются **поверх** базовых настроек: сначала берутся значения из конфига (`use_yt_dlp`, `yt_dlp_use_direct_url`, `backend`, `request_lang`), затем для каждого URL последовательно применяются регулярные выражения из `source_rules`, а уже **поверх всего** работают явные CLI-флаги (которые всегда имеют приоритет).
+В бинарник также зашит небольшой набор дефолтных правил для известных источников (YouTube, Invidious/Piped, ZDF), который включён до пользовательских правил; за счёт этого вы можете переопределять встроенное поведение добавлением своих записей в `source_rules`.
+Если какое-то регулярное выражение в `source_rules` не компилируется, оно тихо игнорируется и не ломает запуск утилиты.
 
 ### Переопределение через переменные окружения
 
