@@ -5,11 +5,44 @@
 - **direct** — прямые запросы к `api.browser.yandex.ru` (динамический protobuf, HMAC-подпись заголовков);
 - **worker** — запросы к worker-сервису (по умолчанию `https://vot-worker.toil.cc`), который проксирует обращение к Яндексу.
 
-## Сборка
+## Установка и сборка
+
+### Готовые бинарники
+
+Ожидаемый способ дистрибуции — выкладывать собранные бинарники в GitHub Releases этого репозитория.
+Типичные файлы:
+- `vot-linux-amd64`, `vot-linux-arm64`;
+- `vot-windows-amd64.exe`;
+- `vot-darwin-amd64`, `vot-darwin-arm64`.
+
+После скачивания:
+- сделайте файл исполняемым (`chmod +x vot-*` на Linux/macOS);
+- положите его в каталог, находящийся в `PATH` (например, `/usr/local/bin` или `~/bin`).
+
+### Сборка из исходников
 
 ```bash
 # из корня репозитория
 go build -o vot ./cmd/vot
+```
+
+Для кроссплатформенной сборки достаточно задать `GOOS`/`GOARCH`, например:
+
+```bash
+# Linux amd64
+GOOS=linux GOARCH=amd64 go build -o vot-linux-amd64 ./cmd/vot
+
+# Linux arm64
+GOOS=linux GOARCH=arm64 go build -o vot-linux-arm64 ./cmd/vot
+
+# Windows amd64
+GOOS=windows GOARCH=amd64 go build -o vot-windows-amd64.exe ./cmd/vot
+
+# macOS amd64
+GOOS=darwin GOARCH=amd64 go build -o vot-darwin-amd64 ./cmd/vot
+
+# macOS arm64 (Apple Silicon)
+GOOS=darwin GOARCH=arm64 go build -o vot-darwin-arm64 ./cmd/vot
 ```
 
 Полученный бинарник `vot` можно положить в `$PATH`.
