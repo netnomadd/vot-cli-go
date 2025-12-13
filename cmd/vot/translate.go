@@ -259,9 +259,21 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 		effectiveURL := u
 		effectiveDirect := flagDirectURL
+		var durationSec float64
 
-		// Optionally use yt-dlp to resolve a direct media URL.
+		// Optionally use yt-dlp to resolve a direct media URL and obtain duration.
 		if useYtDLP {
+			if d, err := getVideoDurationWithYtDLP(u); err != nil {
+				if flagDebug && !flagSilent {
+					fmt.Fprintf(os.Stderr, "[debug] yt-dlp failed to get duration for %s: %v\n", u, err)
+				}
+			} else {
+				durationSec = d
+				if flagDebug && !flagSilent {
+					fmt.Fprintf(os.Stderr, "[debug] yt-dlp duration for %s: %.1fs\n", u, d)
+				}
+			}
+
 			if directURL, err := resolveDirectURLWithYtDLP(u); err != nil {
 				if flagDebug && !flagSilent {
 					fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolution failed for %s: %v\n", u, err)
@@ -285,6 +297,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			DirectURL:       effectiveDirect,
 			SubsURL:         flagSubsURL,
 			VoiceStyle:      voiceStyle,
+			DurationSec:     durationSec,
 			PollIntervalSec: flagPollInterval,
 			PollAttempts:    flagPollAttempts,
 			Debug:           flagDebug,
@@ -335,17 +348,31 @@ func resolveDirectURLWithYtDLP(videoURL string) (string, error) {
 		return "", fmt.Errorf("yt-dlp failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
 	}
 
-	text := strings.TrimSpace(string(output))
-	if text == "" {
+	raw := strings.TrimSpace(string(output))
+	if raw == "" {
 		return "", fmt.Errorf("yt-dlp returned empty output")
 	}
 
-	// yt-dlp -g can return multiple lines; we use the first one.
-	if idx := strings.IndexByte(text, '\n'); idx >= 0 {
-		text = text[:idx]
+	// yt-dlp -g can return multiple lines and warnings; pick the first
+	// line that looks like a URL (contains "://").
+	lines := strings.Split(raw, "\n")
+	var url string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "://") {
+			url = line
+			break
+		}
 	}
 
-	return text, nil
+	if url == "" {
+		return "", fmt.Errorf("yt-dlp did not return a direct URL (output: %s)", raw)
+	}
+
+	return url, nil
 }
 
 // getVideoDurationWithYtDLP asks yt-dlp to print video duration (in seconds)
@@ -364,19 +391,33 @@ func getVideoDurationWithYtDLP(videoURL string) (float64, error) {
 		return 0, fmt.Errorf("yt-dlp failed to get duration: %w (output: %s)", err, strings.TrimSpace(string(output)))
 	}
 
-	line := strings.TrimSpace(string(output))
-	if line == "" {
+	raw := strings.TrimSpace(string(output))
+	if raw == "" {
 		return 0, fmt.Errorf("yt-dlp returned empty duration")
 	}
 
-	// yt-dlp can theoretically print multiple lines; use the first.
-	if idx := strings.IndexByte(line, '\n'); idx >= 0 {
-		line = line[:idx]
+	// yt-dlp can emit warnings plus the duration; search from the end
+	// for the first line that parses as a float.
+	lines := strings.Split(raw, "\n")
+	var value string
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if _, err := strconv.ParseFloat(line, 64); err == nil {
+			value = line
+			break
+		}
 	}
 
-	sec, err := strconv.ParseFloat(line, 64)
+	if value == "" {
+		return 0, fmt.Errorf("yt-dlp did not return a numeric duration (output: %s)", raw)
+	}
+
+	sec, err := strconv.ParseFloat(value, 64)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse yt-dlp duration %q: %w", line, err)
+		return 0, fmt.Errorf("failed to parse yt-dlp duration %q: %w", value, err)
 	}
 
 	return sec, nil
