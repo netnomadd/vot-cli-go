@@ -136,7 +136,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	)
 
 	fs.StringVarP(&flagReqLang, "request-lang", "s", "", "source language code (empty = auto)")
-	fs.StringVarP(&flagRespLang, "response-lang", "t", "", "target language code (required)")
+	fs.StringVarP(&flagRespLang, "response-lang", "t", "ru", "target language code (default: ru)")
 	fs.BoolVar(&flagDirectURL, "direct-url", false, "treat input URL(s) as direct media URLs (mp4/webm)")
 	fs.StringVar(&flagSubsURL, "subs-url", "", "direct subtitles URL to pass as translation help")
 	fs.StringVar(&flagVoiceStyle, "voice-style", "live", "voice style: live (default) or tts")
@@ -153,11 +153,6 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	urls := fs.Args()
 	if len(urls) == 0 {
 		fs.Usage()
-		os.Exit(1)
-	}
-
-	if flagRespLang == "" {
-		fmt.Fprintln(os.Stderr, msg.RespLangRequired)
 		os.Exit(1)
 	}
 
@@ -208,6 +203,15 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		}
 	}
 
+	// If config defines a default target language and the user did not
+	// explicitly pass --response-lang, prefer the config value over the
+	// built-in default "ru".
+	if cfg != nil && cfg.DefaultResponseLang != "" {
+		if f := fs.Lookup("response-lang"); f != nil && !f.Changed {
+			flagRespLang = cfg.DefaultResponseLang
+		}
+	}
+
 	// Effective yt-dlp settings: config provides defaults, CLI flags can override.
 	useYtDLP := cfg != nil && cfg.UseYtDLP
 	ytDLPUseDirectURL := cfg != nil && cfg.YtDLPUseDirectURL
@@ -216,6 +220,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	ytDLPDirectFlagChanged := false
 	reqLangFlagChanged := false
 	backendFlagChanged := false
+	voiceStyleFlagChanged := false
 
 	if f := fs.Lookup("use-yt-dlp"); f != nil && f.Changed {
 		useYtDLP = flagUseYtDLP
@@ -230,6 +235,9 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	}
 	if f := fs.Lookup("backend"); f != nil && f.Changed {
 		backendFlagChanged = true
+	}
+	if f := fs.Lookup("voice-style"); f != nil && f.Changed {
+		voiceStyleFlagChanged = true
 	}
 
 	// Build effective source rules: start with built-ins and then apply optional
@@ -258,11 +266,6 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		workerClient.SetAPIToken(cfg.YandexToken)
 	}
 
-	voiceStyle := backend.VoiceStyleLive
-	if flagVoiceStyle == "tts" {
-		voiceStyle = backend.VoiceStyleTTS
-	}
-
 	exitCode := 0
 	for _, u := range urls {
 		// Allow enough time for polling: interval * attempts + small overhead.
@@ -273,12 +276,14 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		effectiveDirect := flagDirectURL
 		effectiveReqLang := flagReqLang
 		effectiveBackend := flagBackend
+		effectiveVoiceStyle := flagVoiceStyle
 		var durationSec float64
 
 		// Adjust yt-dlp behaviour for this URL based on source-specific rules,
 		// unless the user explicitly overrode the corresponding flags.
 		useYtDLPForURL, ytDLPUseDirectURLForURL := applySourceRules(u, sourceRules, useYtDLP, ytDLPUseDirectURL, useYtDLPFlagChanged, ytDLPDirectFlagChanged)
 		effectiveReqLang, effectiveBackend = applySourceLangAndBackend(u, sourceRules, effectiveReqLang, effectiveBackend, reqLangFlagChanged, backendFlagChanged)
+		effectiveVoiceStyle = applySourceVoiceStyle(u, sourceRules, effectiveVoiceStyle, voiceStyleFlagChanged)
 
 		// Optionally use yt-dlp to resolve a direct media URL and obtain duration.
 		if useYtDLPForURL {
@@ -332,7 +337,22 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 		if flagDebug && !flagSilent {
 			fmt.Fprintf(os.Stderr, "[debug] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v\n",
-				u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, flagVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL)
+				u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL)
+		}
+
+		// Map effective voice style string to backend enum; on invalid value from
+		// rules, fall back to live and optionally log in debug mode.
+		voiceStyle := backend.VoiceStyleLive
+		switch effectiveVoiceStyle {
+		case "live", "":
+			voiceStyle = backend.VoiceStyleLive
+		case "tts":
+			voiceStyle = backend.VoiceStyleTTS
+		default:
+			if flagDebug && !flagSilent {
+				fmt.Fprintf(os.Stderr, "[debug] ignoring invalid voice_style %q from source rules for %s; falling back to live\n", effectiveVoiceStyle, u)
+			}
+			voiceStyle = backend.VoiceStyleLive
 		}
 
 		// Regular video translation.

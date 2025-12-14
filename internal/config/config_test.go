@@ -9,8 +9,8 @@ import (
 func TestLoadExplicitPathOK(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	data := []byte(`{"user_agent":"ua","yandex_hmac_key":"hmac","yandex_token":"token","use_yt_dlp":true,"yt_dlp_use_direct_url":true,
-		"source_rules":[{"pattern":"(?i)^https?://example.com/","use_yt_dlp":true,"yt_dlp_use_direct_url":false,"request_lang":"de","backend":"worker"}]}`)
+	data := []byte(`{"user_agent":"ua","yandex_hmac_key":"hmac","yandex_token":"token","default_response_lang":"en","use_yt_dlp":true,"yt_dlp_use_direct_url":true,
+		"source_rules":[{"pattern":"(?i)^https?://example.com/","use_yt_dlp":true,"yt_dlp_use_direct_url":false,"request_lang":"de","backend":"worker","voice_style":"tts"}]}`)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestLoadExplicitPathOK(t *testing.T) {
 	if cfg == nil {
 		t.Fatalf("Load returned nil config")
 	}
-	if cfg.UserAgent != "ua" || cfg.YandexHMACKey != "hmac" || cfg.YandexToken != "token" {
+	if cfg.UserAgent != "ua" || cfg.YandexHMACKey != "hmac" || cfg.YandexToken != "token" || cfg.DefaultResponseLang != "en" {
 		t.Fatalf("unexpected config values: %+v", cfg)
 	}
 	if !cfg.UseYtDLP || !cfg.YtDLPUseDirectURL {
@@ -35,7 +35,7 @@ func TestLoadExplicitPathOK(t *testing.T) {
 		t.Fatalf("expected 1 source rule, got %d", len(cfg.SourceRules))
 	}
 	rule := cfg.SourceRules[0]
-	if rule.Pattern == "" || rule.UseYtDLP == nil || rule.YtDLPUseDirectURL == nil || rule.RequestLang == nil || rule.Backend == nil {
+	if rule.Pattern == "" || rule.UseYtDLP == nil || rule.YtDLPUseDirectURL == nil || rule.RequestLang == nil || rule.Backend == nil || rule.VoiceStyle == nil {
 		t.Fatalf("source rule not loaded correctly: %+v", rule)
 	}
 }
@@ -79,7 +79,7 @@ func TestLoadMissingDefaultReturnsEmpty(t *testing.T) {
 	}
 
 	// When default config is missing, we expect an empty struct (all fields zero).
-	if cfg.UserAgent != "" || cfg.YandexHMACKey != "" || cfg.YandexToken != "" || cfg.UseYtDLP || cfg.YtDLPUseDirectURL || len(cfg.SourceRules) != 0 {
+	if cfg.UserAgent != "" || cfg.YandexHMACKey != "" || cfg.YandexToken != "" || cfg.DefaultResponseLang != "" || cfg.UseYtDLP || cfg.YtDLPUseDirectURL || len(cfg.SourceRules) != 0 {
 		t.Fatalf("expected empty config for missing default file, got %+v", cfg)
 	}
 }

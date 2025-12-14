@@ -22,7 +22,8 @@ import (
 //   "use_yt_dlp": true,
 //   "yt_dlp_use_direct_url": true,
 //   "request_lang": "de",
-//   "backend": "worker"
+//   "backend": "worker",
+//   "voice_style": "tts"
 // }
 //
 // Rules from config are applied after built-in defaults, so they can override
@@ -33,6 +34,7 @@ type SourceRuleConfig struct {
 	YtDLPUseDirectURL *bool   `json:"yt_dlp_use_direct_url,omitempty"`
 	RequestLang       *string `json:"request_lang,omitempty"`
 	Backend           *string `json:"backend,omitempty"`
+	VoiceStyle        *string `json:"voice_style,omitempty"`
 }
 
 // Config represents user-level configuration for vot-cli-go.
@@ -42,6 +44,10 @@ type Config struct {
 	UserAgent     string `json:"user_agent"`
 	YandexHMACKey string `json:"yandex_hmac_key"`
 	YandexToken   string `json:"yandex_token"`
+
+	// Optional default target language for translations when --response-lang
+	// не указан явно. Если пусто, по умолчанию используется "ru".
+	DefaultResponseLang string `json:"default_response_lang"`
 
 	// Optional integration with yt-dlp (if installed in the system).
 	// These flags only take effect in features that explicitly support yt-dlp.
