@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -519,92 +518,3 @@ func isDirectMediaPath(p string) bool {
 	}
 }
 
-// sourceRule is an internal compiled representation of a per-source rule
-// from config. All fields are optional except the regexp pattern.
-type sourceRule struct {
-	re                *regexp.Regexp
-	useYtDLP          *bool
-	ytDLPUseDirectURL *bool
-	requestLang       *string
-	backend           *string
-}
-
-// buildSourceRulesFromConfig compiles source rules from config (if any).
-// At the moment we don't ship built-in rules; all behaviour is driven by
-// user config to keep the binary simple and predictable.
-func buildSourceRulesFromConfig(cfg *config.Config) []sourceRule {
-	var rules []sourceRule
-	if cfg == nil {
-		return rules
-	}
-
-	for _, r := range cfg.SourceRules {
-		if r.Pattern == "" {
-			continue
-		}
-		re, err := regexp.Compile(r.Pattern)
-		if err != nil {
-			// Ignore invalid patterns to avoid breaking the CLI.
-			continue
-		}
-		rules = append(rules, sourceRule{
-			re:                re,
-			useYtDLP:          r.UseYtDLP,
-			ytDLPUseDirectURL: r.YtDLPUseDirectURL,
-			requestLang:       r.RequestLang,
-			backend:           r.Backend,
-		})
-	}
-
-	return rules
-}
-
-// applySourceRules adjusts yt-dlp usage flags for a specific URL based on
-// matching source rules. CLI flags take precedence over rules when changed.
-func applySourceRules(rawURL string, rules []sourceRule, baseUseYtDLP, baseYtDLPUseDirectURL bool, useFlagChanged, directFlagChanged bool) (bool, bool) {
-	use := baseUseYtDLP
-	direct := baseYtDLPUseDirectURL
-
-	if len(rules) == 0 {
-		return use, direct
-	}
-
-	for _, r := range rules {
-		if !r.re.MatchString(rawURL) {
-			continue
-		}
-		if !useFlagChanged && r.useYtDLP != nil {
-			use = *r.useYtDLP
-		}
-		if !directFlagChanged && r.ytDLPUseDirectURL != nil {
-			direct = *r.ytDLPUseDirectURL
-		}
-	}
-
-	return use, direct
-}
-
-// applySourceLangAndBackend adjusts request language and backend based on
-// matching source rules. CLI flags again take precedence when explicitly set.
-func applySourceLangAndBackend(rawURL string, rules []sourceRule, baseReqLang, baseBackend string, reqLangFlagChanged, backendFlagChanged bool) (string, string) {
-	reqLang := baseReqLang
-	backend := baseBackend
-
-	if len(rules) == 0 {
-		return reqLang, backend
-	}
-
-	for _, r := range rules {
-		if !r.re.MatchString(rawURL) {
-			continue
-		}
-		if !reqLangFlagChanged && r.requestLang != nil {
-			reqLang = *r.requestLang
-		}
-		if !backendFlagChanged && r.backend != nil {
-			backend = *r.backend
-		}
-	}
-
-	return reqLang, backend
-}
