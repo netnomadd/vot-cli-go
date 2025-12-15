@@ -179,9 +179,9 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		switch status {
 		case 2, 3, 6: // WAITING / LONG_WAITING / AUDIO_REQUESTED
 			retry = true
-		case 7: // SESSION_REQUIRED
+		case 7: // SESSION_REQUIRED – requires authenticated Yandex account / browser session
 			if msg == "" {
-				msg = "yandex: this video requires an authenticated Yandex session (SESSION_REQUIRED)"
+				msg = "yandex: this video requires an authenticated Yandex session (SESSION_REQUIRED). This usually means the video is restricted to logged-in Yandex Browser users; the CLI cannot bypass this."
 			} else {
 				msg = fmt.Sprintf("yandex: this video requires an authenticated Yandex session (SESSION_REQUIRED): %s", msg)
 			}
@@ -193,7 +193,7 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 				base = fmt.Sprintf("yandex: translation not ready or failed (status=%d): %s", status, msg)
 			}
 			if p.DirectURL {
-				base += " (this direct media URL may not be supported; try passing the original page URL or disabling direct-url / yt-dlp direct mode)"
+				base += " (unsupported direct URL: this media link may not be accepted by Yandex; try passing the original page URL or disabling direct-url / yt-dlp direct mode)"
 			}
 			msg = base
 		}
@@ -390,7 +390,7 @@ func (c *DirectClient) doProtoRequest(ctx context.Context, path string, body []b
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusForbidden {
-			return nil, fmt.Errorf("yandex: unexpected status %s (the API refused the request; this URL, site or direct media link may not be supported)", resp.Status)
+			return nil, fmt.Errorf("yandex: unexpected status %s (HTTP 403 Forbidden). The API refused the request – this may mean your config (token/HMAC/user-agent) is invalid, the video/site is not supported, or access is temporarily blocked.", resp.Status)
 		}
 		return nil, fmt.Errorf("yandex: unexpected status %s from API", resp.Status)
 	}

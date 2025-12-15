@@ -219,3 +219,136 @@ vot --silent translate --response-lang=ru "https://youtu.be/..."  # только
 ```bash
 VOT_LANG=ru vot --backend=worker --config ~/.config/vot-cli/config.json translate --response-lang=ru "https://youtu.be/..."
 ```
+
+## Примеры конфигов
+
+### Минимальный конфиг (direct backend)
+
+```json
+{
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... YaBrowser/25.4.0.0 Safari/537.36",
+  "default_response_lang": "ru"
+}
+```
+
+Подойдёт, если вы используете только `direct` и не хотите трогать Yandex OAuth / HMAC-ключ в явном виде (используется значение по умолчанию из бинарника).
+
+### Worker + yt-dlp по умолчанию
+
+```json
+{
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... YaBrowser/25.4.0.0 Safari/537.36",
+  "yandex_hmac_key": "bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf",
+  "yandex_token": "ya-0.AQA...",
+  "default_response_lang": "ru",
+  "use_yt_dlp": true,
+  "yt_dlp_use_direct_url": false
+}
+```
+
+В таком варианте `vot` по умолчанию использует `yt-dlp` (если он установлен) для получения метаданных и длительности, но в backend отправляется оригинальный URL страницы, а не прямой медиa-URL.
+
+### Пример с `source_rules` для популярных сайтов
+
+```json
+{
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... YaBrowser/25.4.0.0 Safari/537.36",
+  "default_response_lang": "ru",
+  "use_yt_dlp": true,
+  "yt_dlp_use_direct_url": false,
+  "source_rules": [
+    {
+      "pattern": "(?i)^https?://(www\\.)?youtube\\.com/watch",
+      "use_yt_dlp": true,
+      "yt_dlp_use_direct_url": false,
+      "backend": "worker",
+      "voice_style": "live"
+    },
+    {
+      "pattern": "(?i)^https?://(www\\.)?youtu\\.be/",
+      "use_yt_dlp": true,
+      "yt_dlp_use_direct_url": false,
+      "backend": "worker"
+    },
+    {
+      "pattern": "(?i)^https?://(www\\.)?(invidious|piped)\\.",
+      "use_yt_dlp": true,
+      "yt_dlp_use_direct_url": false,
+      "backend": "worker"
+    },
+    {
+      "pattern": "(?i)^https?://www\\.zdf\\.de/play/",
+      "use_yt_dlp": true,
+      "yt_dlp_use_direct_url": true,
+      "request_lang": "de",
+      "backend": "worker",
+      "voice_style": "tts"
+    }
+  ]
+}
+```
+
+Эти правила:
+- направляют все YouTube / Invidious / Piped ссылки через `yt-dlp` и backend `worker`;
+- для ZDF сразу используют прямой URL от `yt-dlp`, фиксируют язык оригинала `de` и переключают голос на `tts`.
+
+CLI-флаги при этом по-прежнему имеют приоритет и могут переопределить поведение из конфига.
+
+## Сценарии для популярных сайтов
+
+Ниже несколько типовых сценариев (предполагается, что конфиг похож на примеры выше).
+
+### YouTube / Invidious / Piped (страничный URL)
+
+```bash
+vot translate -t ru "https://www.youtube.com/watch?v=..."
+vot translate -t ru "https://invidious.example/watch?v=..."
+```
+
+- Правило из `source_rules` включает `yt-dlp`, получает длительность и, как правило, оставляет backend `worker`.
+- Если backend не принимает прямой URL от `yt-dlp`, можно глобально или в правиле отключить `yt_dlp_use_direct_url`.
+
+### ZDF (пример из wiki FOSWLY)
+
+```bash
+vot translate --debug "https://www.zdf.de/play/..."
+```
+
+- При срабатывании правила из `source_rules` URL предварительно обрабатывается `yt-dlp`, и в backend уходит уже прямой медиa-URL.
+- Если сайт поменял схему URL или перестал поддерживаться, команда покажет более подробные debug-логи, по которым проще понять, на каком этапе произошёл сбой.
+
+### Прямые mp4/webm ссылки
+
+```bash
+vot translate --direct-url -t ru "https://cdn.example.com/video.mp4"
+```
+
+- В этом режиме утилита не использует `yt-dlp` и считает, что URL уже указывает на готовый медиa-ресурс.
+- Не все backend’ы принимают произвольные прямые ссылки; в случае отказа стоит вернуться к URL страницы и/или включить `yt-dlp`.
+
+## Troubleshooting
+
+### HTTP 403 / SESSION_REQUIRED / пустой URL от backend
+
+- Убедитесь, что `user_agent` и `yandex_hmac_key` актуальны (сравните с рабочими примерами в репозиториях `vot-cli` / `vot.js`).
+- Проверьте, не попадаете ли вы под блокировки/лимиты (частые запросы, VPN, нестабильный IP); иногда помогает смена IP или ожидание.
+- Если ошибка приходит только от одного backend’а (`direct` или `worker`), попробуйте переключиться на другой флагом `--backend`.
+
+### Перевод «завис» (много попыток поллинга, но без результата)
+
+- Увеличьте `--poll-attempts` или `--poll-interval` (или соответствующие значения в конфиге) — для длинных роликов требуется больше времени.
+- Включите `--debug`, чтобы видеть номер попытки и статус, возвращаемый backend’ом.
+- Если после нескольких запусков ситуация не меняется для одного и того же URL, возможно, он сейчас не поддерживается сервисом перевода.
+
+### Проблемы с `yt-dlp`
+
+- Убедитесь, что `yt-dlp` установлен и доступен в `PATH` (`yt-dlp --version`).
+- При подозрении на некорректный разбор сайта можно временно отключить интеграцию через конфиг (`"use_yt_dlp": false`).
+- Предупреждения вида "No supported JavaScript runtime" относятся к самому `yt-dlp` и не блокируют работу `vot`, но могут приводить к отсутствию некоторых форматов.
+
+### Неожиданные языки / голос
+
+- Проверьте `default_response_lang` в конфиге и значение флага `--response-lang`.
+- Убедитесь, что для URL не срабатывает правило из `source_rules`, которое меняет `request_lang` или `voice_style`.
+- При отладке всегда полезно включать `--debug` — финальные параметры запроса (языки, backend, стиль голоса, использование `yt-dlp`) выводятся перед отправкой запроса.
+

@@ -39,6 +39,7 @@ type messages struct {
 	TimeoutErrorFmt      string
 	CanceledError        string
 	ErrorPrefix          string
+	YtDLPNotFoundFmt     string
 }
 
 // getMessages returns localized messages based on --lang flag, VOT_LANG or CLI args.
@@ -85,6 +86,7 @@ func getMessages() messages {
 			TimeoutErrorFmt:      "перевод не завершился за %d секунд; попробуйте увеличить --poll-attempts или --poll-interval",
 			CanceledError:        "перевод отменён",
 			ErrorPrefix:          "ошибка",
+			YtDLPNotFoundFmt:     "yt-dlp включён (флаг/конфиг), но бинарник не найден в PATH: %v; продолжаю без yt-dlp",
 		}
 	default:
 		return messages{
@@ -105,6 +107,7 @@ func getMessages() messages {
 			TimeoutErrorFmt:      "translation timed out after %d seconds; try increasing --poll-attempts or --poll-interval",
 			CanceledError:        "translation canceled",
 			ErrorPrefix:          "error",
+			YtDLPNotFoundFmt:     "yt-dlp is enabled (flag/config) but not found in PATH: %v; continuing without yt-dlp",
 		}
 	}
 }
@@ -133,6 +136,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		flagPollAttempts      int
 		flagUseYtDLP          bool
 		flagYtDLPUseDirectURL bool
+		flagExplain           bool
 	)
 
 	fs.StringVarP(&flagReqLang, "request-lang", "s", "", "source language code (empty = auto)")
@@ -144,6 +148,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	fs.IntVar(&flagPollAttempts, "poll-attempts", 10, "maximum number of polling attempts")
 	fs.BoolVar(&flagUseYtDLP, "use-yt-dlp", false, "use yt-dlp (if available) to assist with URL handling")
 	fs.BoolVar(&flagYtDLPUseDirectURL, "yt-dlp-use-direct-url", false, "when using yt-dlp, pass its direct media URL to backend instead of original URL")
+	fs.BoolVar(&flagExplain, "explain", false, "print how each URL will be handled and exit without contacting backends")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -230,6 +235,18 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		ytDLPUseDirectURL = flagYtDLPUseDirectURL
 		ytDLPDirectFlagChanged = true
 	}
+
+	// Check availability of yt-dlp once, so that explicit --use-yt-dlp or
+	// config settings do not silently do nothing when the binary is missing.
+	ytDLPAvailable := true
+	if useYtDLP {
+		if _, err := exec.LookPath("yt-dlp"); err != nil {
+			ytDLPAvailable = false
+			if !flagSilent {
+				fmt.Fprintf(os.Stderr, msg.YtDLPNotFoundFmt+"\n", err)
+			}
+		}
+	}
 	if f := fs.Lookup("request-lang"); f != nil && f.Changed {
 		reqLangFlagChanged = true
 	}
@@ -281,7 +298,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 		// Adjust yt-dlp behaviour for this URL based on source-specific rules,
 		// unless the user explicitly overrode the corresponding flags.
-		useYtDLPForURL, ytDLPUseDirectURLForURL := applySourceRules(u, sourceRules, useYtDLP, ytDLPUseDirectURL, useYtDLPFlagChanged, ytDLPDirectFlagChanged)
+		useYtDLPForURL, ytDLPUseDirectURLForURL := applySourceRules(u, sourceRules, useYtDLP && ytDLPAvailable, ytDLPUseDirectURL, useYtDLPFlagChanged, ytDLPDirectFlagChanged)
 		effectiveReqLang, effectiveBackend = applySourceLangAndBackend(u, sourceRules, effectiveReqLang, effectiveBackend, reqLangFlagChanged, backendFlagChanged)
 		effectiveVoiceStyle = applySourceVoiceStyle(u, sourceRules, effectiveVoiceStyle, voiceStyleFlagChanged)
 
@@ -340,6 +357,17 @@ func translateMain(parent *flag.FlagSet, args []string) {
 				u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL)
 		}
 
+		// In explain mode we only show how the URL would be processed and skip
+		// any calls to Yandex backends.
+		if flagExplain {
+			if !flagSilent {
+				fmt.Fprintf(os.Stderr, "[explain] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v\n",
+					u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL)
+			}
+			cancel()
+			continue
+		}
+
 		// Map effective voice style string to backend enum; on invalid value from
 		// rules, fall back to live and optionally log in debug mode.
 		voiceStyle := backend.VoiceStyleLive
@@ -375,7 +403,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			} else if errors.Is(err, context.Canceled) {
 				fmt.Fprintf(os.Stderr, "%s: %s\n", msg.ErrorPrefix, msg.CanceledError)
 			} else {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", msg.ErrorPrefix, err)
+				fmt.Fprintf(os.Stderr, "%s: %s: %v\n", msg.ErrorPrefix, u, err)
 			}
 			exitCode = 1
 			continue
