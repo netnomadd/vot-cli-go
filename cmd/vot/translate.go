@@ -24,6 +24,7 @@ type messages struct {
 	UsageRoot            string
 	CommandsHeader       string
 	CommandTranslate     string
+	CommandDoctor        string
 	GlobalOptionsHeader  string
 	GlobalOptionsConfig  string
 	GlobalOptionsSilent  string
@@ -33,35 +34,50 @@ type messages struct {
 	HelpHint             string
 
 	// Translate command
-	UsageTranslate                string
-	TranslateOptionsHeader       string
-	FlagReqLangHelp              string
-	FlagRespLangHelp             string
-	FlagDirectURLHelp            string
-	FlagSubsURLHelp              string
-	FlagVoiceStyleHelp           string
-	FlagPollIntervalHelp         string
-	FlagPollAttemptsHelp         string
-	FlagUseYtDLPHelp             string
-	FlagYtDLPUseDirectURLHelp    string
-	FlagYtDLPCookiesHelp         string
+	UsageTranslate                  string
+	TranslateOptionsHeader          string
+	FlagReqLangHelp                 string
+	FlagRespLangHelp                string
+	FlagDirectURLHelp               string
+	FlagSubsURLHelp                 string
+	FlagVoiceStyleHelp              string
+	FlagPollIntervalHelp            string
+	FlagPollAttemptsHelp            string
+	FlagUseYtDLPHelp                string
+	FlagYtDLPUseDirectURLHelp       string
+	FlagYtDLPCookiesHelp            string
 	FlagYtDLPCookiesFromBrowserHelp string
-	FlagExplainHelp              string
-	RespLangRequired             string
-	InvalidVoiceStyle            string
-	PollIntervalTooSmall         string
-	PollAttemptsInvalid          string
-	FailedLoadConfigFmt          string
-	UnknownBackendFmt            string
-	UnknownCommandFmt            string
-	TimeoutErrorFmt              string
-	CanceledError                string
-	ErrorPrefix                  string
-	YtDLPNotFoundFmt             string
-	YtDLPAuthHint                string
-	YtDLPFailureFmt              string
-	SessionRequiredHelp          string
-	UnsupportedDirectURLHelp     string
+	FlagExplainHelp                 string
+	RespLangRequired                string
+	InvalidVoiceStyle               string
+	PollIntervalTooSmall            string
+	PollAttemptsInvalid             string
+	FailedLoadConfigFmt             string
+	UnknownBackendFmt               string
+	UnknownCommandFmt               string
+	TimeoutErrorFmt                 string
+	CanceledError                   string
+	ErrorPrefix                     string
+	YtDLPNotFoundFmt                string
+	YtDLPAuthHint                   string
+	YtDLPFailureFmt                 string
+	SessionRequiredHelp             string
+	UnsupportedDirectURLHelp        string
+
+	// Doctor command
+	UsageDoctor               string
+	DoctorChecksHeader        string
+	DoctorConfigPathLabel     string
+	DoctorConfigStatusOK      string
+	DoctorConfigStatusMissing string
+	DoctorNoConfigPath        string
+	DoctorEnvHeader           string
+	DoctorFieldSet            string
+	DoctorFieldMissing        string
+	DoctorYtDLPHeader         string
+	DoctorYtDLPFound          string
+	DoctorYtDLPNotFoundFmt    string
+	DoctorSummaryOK           string
 }
 
 // getMessages returns localized messages based on --lang flag, VOT_LANG or CLI args.
@@ -94,6 +110,7 @@ func getMessages() messages {
 			UsageRoot:            "использование: vot [глобальные опции] <команда> [опции] [аргументы...]",
 			CommandsHeader:       "команды:",
 			CommandTranslate:     "translate   перевод видео и вывод ссылки(ок) на аудио",
+			CommandDoctor:        "doctor      проверка конфигурации и окружения",
 			GlobalOptionsHeader:  "глобальные опции:",
 			GlobalOptionsConfig:  "путь к файлу конфигурации",
 			GlobalOptionsSilent:  "тихий режим: только ссылки на результат в stdout, ошибки в stderr",
@@ -102,41 +119,56 @@ func getMessages() messages {
 			GlobalOptionsBackend: "backend для перевода: direct или worker",
 			HelpHint:             "запустите 'vot <команда> --help' для справки по опциям команды",
 
-			UsageTranslate:              "использование: vot translate [опции] <url> [url2 ...]",
-			TranslateOptionsHeader:      "опции:",
-			FlagReqLangHelp:             "код языка оригинала (пусто = автоопределение)",
-			FlagRespLangHelp:            "код языка перевода (по умолчанию: ru)",
-			FlagDirectURLHelp:           "считать входные URL прямыми ссылками на медиа (mp4/webm и т.п.)",
-			FlagSubsURLHelp:             "прямая ссылка на субтитры, которые помогут при переводе",
-			FlagVoiceStyleHelp:          "стиль голоса: live (по умолчанию) или tts",
-			FlagPollIntervalHelp:        "интервал опроса в секундах (не менее 30)",
-			FlagPollAttemptsHelp:        "максимальное число попыток опроса",
-			FlagUseYtDLPHelp:            "использовать yt-dlp (если установлен) для работы с URL",
-			FlagYtDLPUseDirectURLHelp:   "при использовании yt-dlp передавать на backend прямой медиа‑URL вместо исходной страницы",
-			FlagYtDLPCookiesHelp:        "путь к файлу cookies, передаваемому в yt-dlp (--cookies)",
+			UsageTranslate:                  "использование: vot translate [опции] <url> [url2 ...]",
+			TranslateOptionsHeader:          "опции:",
+			FlagReqLangHelp:                 "код языка оригинала (пусто = автоопределение)",
+			FlagRespLangHelp:                "код языка перевода (по умолчанию: ru)",
+			FlagDirectURLHelp:               "считать входные URL прямыми ссылками на медиа (mp4/webm и т.п.)",
+			FlagSubsURLHelp:                 "прямая ссылка на субтитры, которые помогут при переводе",
+			FlagVoiceStyleHelp:              "стиль голоса: live (по умолчанию) или tts",
+			FlagPollIntervalHelp:            "интервал опроса в секундах (не менее 30)",
+			FlagPollAttemptsHelp:            "максимальное число попыток опроса",
+			FlagUseYtDLPHelp:                "использовать yt-dlp (если установлен) для работы с URL",
+			FlagYtDLPUseDirectURLHelp:       "при использовании yt-dlp передавать на backend прямой медиа‑URL вместо исходной страницы",
+			FlagYtDLPCookiesHelp:            "путь к файлу cookies, передаваемому в yt-dlp (--cookies)",
 			FlagYtDLPCookiesFromBrowserHelp: "браузер для передачи cookies в yt-dlp (--cookies-from-browser)",
-			FlagExplainHelp:             "показать, как будет обработан каждый URL, и выйти, не обращаясь к backend'ам",
-			RespLangRequired:            "--response-lang обязателен",
-			InvalidVoiceStyle:           "--voice-style может быть только 'live' или 'tts'",
-			PollIntervalTooSmall:        "--poll-interval должен быть не менее 30 секунд",
-			PollAttemptsInvalid:         "--poll-attempts должен быть положительным числом",
-			FailedLoadConfigFmt:         "не удалось загрузить конфиг: %v",
-			UnknownBackendFmt:           "неизвестный backend '%s' (ожидается 'direct' или 'worker')",
-			UnknownCommandFmt:           "неизвестная команда: %s",
-			TimeoutErrorFmt:             "перевод не завершился за %d секунд; попробуйте увеличить --poll-attempts или --poll-interval",
-			CanceledError:               "перевод отменён",
-			ErrorPrefix:                 "ошибка",
-			YtDLPNotFoundFmt:            "yt-dlp включён (флаг/конфиг), но бинарник не найден в PATH: %v; продолжаю без yt-dlp",
-			YtDLPAuthHint:               "подсказка: ошибки yt-dlp для YouTube часто означают, что нужны cookies авторизации; см. https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp и раздел \"Проблемы с yt-dlp\" в README vot.",
-			YtDLPFailureFmt:             "yt-dlp не смог обработать этот URL %s; продолжаю без yt-dlp.",
-			SessionRequiredHelp:         "Подсказка: SESSION_REQUIRED обычно означает, что видео доступно только авторизованным пользователям Яндекс.Браузера; CLI не может обойти это ограничение.",
-			UnsupportedDirectURLHelp:    "Подсказка: backend не принимает этот прямой URL; попробуйте передать исходный URL страницы или отключить режим прямых ссылок / yt-dlp direct.",
+			FlagExplainHelp:                 "показать, как будет обработан каждый URL, и выйти, не обращаясь к backend'ам",
+			RespLangRequired:                "--response-lang обязателен",
+			InvalidVoiceStyle:               "--voice-style может быть только 'live' или 'tts'",
+			PollIntervalTooSmall:            "--poll-interval должен быть не менее 30 секунд",
+			PollAttemptsInvalid:             "--poll-attempts должен быть положительным числом",
+			FailedLoadConfigFmt:             "не удалось загрузить конфиг: %v",
+			UnknownBackendFmt:               "неизвестный backend '%s' (ожидается 'direct' или 'worker')",
+			UnknownCommandFmt:               "неизвестная команда: %s",
+			TimeoutErrorFmt:                 "перевод не завершился за %d секунд; попробуйте увеличить --poll-attempts или --poll-interval",
+			CanceledError:                   "перевод отменён",
+			ErrorPrefix:                     "ошибка",
+			YtDLPNotFoundFmt:                "yt-dlp включён (флаг/конфиг), но бинарник не найден в PATH: %v; продолжаю без yt-dlp",
+			YtDLPAuthHint:                   "подсказка: ошибки yt-dlp для YouTube часто означают, что нужны cookies авторизации; см. https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp и раздел \"Проблемы с yt-dlp\" в README vot.",
+			YtDLPFailureFmt:                 "yt-dlp не смог обработать этот URL %s; продолжаю без yt-dlp.",
+			SessionRequiredHelp:             "Подсказка: SESSION_REQUIRED обычно означает, что видео доступно только авторизованным пользователям Яндекс-Браузера; CLI не может обойти это ограничение.",
+			UnsupportedDirectURLHelp:        "Подсказка: backend не принимает этот прямой URL; попробуйте передать исходный URL страницы или отключить режим прямых ссылок / yt-dlp direct.",
+
+			UsageDoctor:               "использование: vot doctor [глобальные опции]",
+			DoctorChecksHeader:        "проверки:",
+			DoctorConfigPathLabel:     "конфиг:",
+			DoctorConfigStatusOK:      "  статус: найден и успешно разобран",
+			DoctorConfigStatusMissing: "  статус: файл не найден (используются встроенные значения по умолчанию)",
+			DoctorNoConfigPath:        "конфиг: для этой ОС нет стандартного пути; используйте --config",
+			DoctorEnvHeader:           "переменные окружения:",
+			DoctorFieldSet:            "задано",
+			DoctorFieldMissing:        "не задано",
+			DoctorYtDLPHeader:         "yt-dlp:",
+			DoctorYtDLPFound:          "  бинарник: найден в PATH",
+			DoctorYtDLPNotFoundFmt:    "  бинарник: не найден в PATH: %v",
+			DoctorSummaryOK:           "проверки завершены; если проблемы сохраняются, запустите 'vot translate --debug ...' и изучите вывод.",
 		}
 	default:
 		return messages{
 			UsageRoot:            "usage: vot [global options] <command> [options] [args...]",
 			CommandsHeader:       "commands:",
 			CommandTranslate:     "translate   translate video and print audio URL(s)",
+			CommandDoctor:        "doctor      run configuration and environment diagnostics",
 			GlobalOptionsHeader:  "global options:",
 			GlobalOptionsConfig:  "path to config file",
 			GlobalOptionsSilent:  "silent mode: only result URLs to stdout, errors to stderr",
@@ -145,35 +177,49 @@ func getMessages() messages {
 			GlobalOptionsBackend: "backend to use: direct or worker",
 			HelpHint:             "run 'vot <command> --help' for command-specific options",
 
-			UsageTranslate:              "usage: vot translate [options] <url> [url2 ...]",
-			TranslateOptionsHeader:      "options:",
-			FlagReqLangHelp:             "source language code (empty = auto)",
-			FlagRespLangHelp:            "target language code (default: ru)",
-			FlagDirectURLHelp:           "treat input URL(s) as direct media URLs (mp4/webm)",
-			FlagSubsURLHelp:             "direct subtitles URL to pass as translation help",
-			FlagVoiceStyleHelp:          "voice style: live (default) or tts",
-			FlagPollIntervalHelp:        "polling interval in seconds (min 30)",
-			FlagPollAttemptsHelp:        "maximum number of polling attempts",
-			FlagUseYtDLPHelp:            "use yt-dlp (if available) to assist with URL handling",
-			FlagYtDLPUseDirectURLHelp:   "when using yt-dlp, pass its direct media URL to backend instead of original URL",
-			FlagYtDLPCookiesHelp:        "path to cookies file to pass to yt-dlp (--cookies)",
+			UsageTranslate:                  "usage: vot translate [options] <url> [url2 ...]",
+			TranslateOptionsHeader:          "options:",
+			FlagReqLangHelp:                 "source language code (empty = auto)",
+			FlagRespLangHelp:                "target language code (default: ru)",
+			FlagDirectURLHelp:               "treat input URL(s) as direct media URLs (mp4/webm)",
+			FlagSubsURLHelp:                 "direct subtitles URL to pass as translation help",
+			FlagVoiceStyleHelp:              "voice style: live (default) or tts",
+			FlagPollIntervalHelp:            "polling interval in seconds (min 30)",
+			FlagPollAttemptsHelp:            "maximum number of polling attempts",
+			FlagUseYtDLPHelp:                "use yt-dlp (if available) to assist with URL handling",
+			FlagYtDLPUseDirectURLHelp:       "when using yt-dlp, pass its direct media URL to backend instead of original URL",
+			FlagYtDLPCookiesHelp:            "path to cookies file to pass to yt-dlp (--cookies)",
 			FlagYtDLPCookiesFromBrowserHelp: "browser spec to pass to yt-dlp (--cookies-from-browser)",
-			FlagExplainHelp:             "print how each URL will be handled and exit without contacting backends",
-			RespLangRequired:            "--response-lang is required",
-			InvalidVoiceStyle:           "--voice-style must be 'live' or 'tts'",
-			PollIntervalTooSmall:        "--poll-interval must be at least 30 seconds",
-			PollAttemptsInvalid:         "--poll-attempts must be positive",
-			FailedLoadConfigFmt:         "failed to load config: %v",
-			UnknownBackendFmt:           "unknown backend '%s' (expected 'direct' or 'worker')",
-			UnknownCommandFmt:           "unknown command: %s",
-			TimeoutErrorFmt:             "translation timed out after %d seconds; try increasing --poll-attempts or --poll-interval",
-			CanceledError:               "translation canceled",
-			ErrorPrefix:                 "error",
-			YtDLPNotFoundFmt:            "yt-dlp is enabled (flag/config) but not found in PATH: %v; continuing without yt-dlp",
-			YtDLPAuthHint:               "hint: yt-dlp errors for YouTube often mean that authentication cookies are required; see https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp and the \"Issues with yt-dlp\" section in the vot README.",
-			YtDLPFailureFmt:             "yt-dlp failed for this URL %s; continuing without yt-dlp.",
-			SessionRequiredHelp:         "hint: SESSION_REQUIRED usually means the video is limited to logged-in Yandex Browser users; the CLI cannot bypass this restriction.",
-			UnsupportedDirectURLHelp:    "hint: the backend does not accept this direct URL; try passing the original page URL or disabling direct-url / yt-dlp direct mode.",
+			FlagExplainHelp:                 "print how each URL will be handled and exit without contacting backends",
+			RespLangRequired:                "--response-lang is required",
+			InvalidVoiceStyle:               "--voice-style must be 'live' or 'tts'",
+			PollIntervalTooSmall:            "--poll-interval must be at least 30 seconds",
+			PollAttemptsInvalid:             "--poll-attempts must be positive",
+			FailedLoadConfigFmt:             "failed to load config: %v",
+			UnknownBackendFmt:               "unknown backend '%s' (expected 'direct' or 'worker')",
+			UnknownCommandFmt:               "unknown command: %s",
+			TimeoutErrorFmt:                 "translation timed out after %d seconds; try increasing --poll-attempts or --poll-interval",
+			CanceledError:                   "translation canceled",
+			ErrorPrefix:                     "error",
+			YtDLPNotFoundFmt:                "yt-dlp is enabled (flag/config) but not found in PATH: %v; continuing without yt-dlp",
+			YtDLPAuthHint:                   "hint: yt-dlp errors for YouTube often mean that authentication cookies are required; see https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp and the \"Issues with yt-dlp\" section in the vot README.",
+			YtDLPFailureFmt:                 "yt-dlp failed for this URL %s; continuing without yt-dlp.",
+			SessionRequiredHelp:             "hint: SESSION_REQUIRED usually means the video is limited to logged-in Yandex Browser users; the CLI cannot bypass this restriction.",
+			UnsupportedDirectURLHelp:        "hint: the backend does not accept this direct URL; try passing the original page URL or disabling direct-url / yt-dlp direct mode.",
+
+			UsageDoctor:               "usage: vot doctor [global options]",
+			DoctorChecksHeader:        "checks:",
+			DoctorConfigPathLabel:     "config:",
+			DoctorConfigStatusOK:      "  status: found and parsed OK",
+			DoctorConfigStatusMissing: "  status: file not found (using built-in defaults)",
+			DoctorNoConfigPath:        "config: no default path for this OS; use --config",
+			DoctorEnvHeader:           "environment overrides:",
+			DoctorFieldSet:            "set",
+			DoctorFieldMissing:        "not set",
+			DoctorYtDLPHeader:         "yt-dlp:",
+			DoctorYtDLPFound:          "  binary: found in PATH",
+			DoctorYtDLPNotFoundFmt:    "  binary: not found in PATH: %v",
+			DoctorSummaryOK:           "checks completed; if issues persist, run 'vot translate --debug ...' and review the output.",
 		}
 	}
 }
@@ -694,4 +740,3 @@ func isDirectMediaPath(p string) bool {
 		return false
 	}
 }
-

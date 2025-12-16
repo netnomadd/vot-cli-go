@@ -21,6 +21,9 @@ func printRootUsage(root *flag.FlagSet) {
 	fmt.Fprintln(os.Stderr, msg.UsageRoot)
 	fmt.Fprintln(os.Stderr, "\n"+msg.CommandsHeader)
 	fmt.Fprintln(os.Stderr, "  "+msg.CommandTranslate)
+	if msg.CommandDoctor != "" {
+		fmt.Fprintln(os.Stderr, "  "+msg.CommandDoctor)
+	}
 	fmt.Fprintln(os.Stderr, "\n"+msg.GlobalOptionsHeader)
 	root.PrintDefaults()
 	fmt.Fprintln(os.Stderr, "\n"+msg.HelpHint)
@@ -47,6 +50,8 @@ func main() {
 	switch subcmd {
 	case "translate":
 		translateMain(root, os.Args[2:])
+	case "doctor", "check":
+		doctorMain(root, os.Args[2:])
 	case "help", "-h", "--help":
 		root.Usage()
 		os.Exit(0)
