@@ -450,17 +450,23 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			continue
 		}
 
+		matchedRules := matchedSourceRuleSummaries(u, sourceRules)
+		matchedSummary := "-"
+		if len(matchedRules) > 0 {
+			matchedSummary = strings.Join(matchedRules, ";")
+		}
+
 		if flagDebug && !flagSilent {
-			fmt.Fprintf(os.Stderr, "[debug] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v yt_dlp_cookies=%s yt_dlp_cookies_from_browser=%s\n",
-				u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser)
+			fmt.Fprintf(os.Stderr, "[debug] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v yt_dlp_cookies=%s yt_dlp_cookies_from_browser=%s source_rules=%s\n",
+				u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser, matchedSummary)
 		}
 
 		// In explain mode we only show how the URL would be processed and skip
 		// any calls to Yandex backends.
 		if flagExplain {
 			if !flagSilent {
-				fmt.Fprintf(os.Stderr, "[explain] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v yt_dlp_cookies=%s yt_dlp_cookies_from_browser=%s\n",
-					u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser)
+				fmt.Fprintf(os.Stderr, "[explain] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v yt_dlp_cookies=%s yt_dlp_cookies_from_browser=%s source_rules=%s\n",
+					u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser, matchedSummary)
 			}
 			cancel()
 			continue
