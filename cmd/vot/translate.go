@@ -127,16 +127,18 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	}
 
 	var (
-		flagReqLang           string
-		flagRespLang          string
-		flagDirectURL         bool
-		flagSubsURL           string
-		flagVoiceStyle        string
-		flagPollInterval      int
-		flagPollAttempts      int
-		flagUseYtDLP          bool
-		flagYtDLPUseDirectURL bool
-		flagExplain           bool
+		flagReqLang                 string
+		flagRespLang                string
+		flagDirectURL               bool
+		flagSubsURL                 string
+		flagVoiceStyle              string
+		flagPollInterval            int
+		flagPollAttempts            int
+		flagUseYtDLP                bool
+		flagYtDLPUseDirectURL       bool
+		flagYtDLPCookies            string
+		flagYtDLPCookiesFromBrowser string
+		flagExplain                 bool
 	)
 
 	fs.StringVarP(&flagReqLang, "request-lang", "s", "", "source language code (empty = auto)")
@@ -148,6 +150,8 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	fs.IntVar(&flagPollAttempts, "poll-attempts", 10, "maximum number of polling attempts")
 	fs.BoolVar(&flagUseYtDLP, "use-yt-dlp", false, "use yt-dlp (if available) to assist with URL handling")
 	fs.BoolVar(&flagYtDLPUseDirectURL, "yt-dlp-use-direct-url", false, "when using yt-dlp, pass its direct media URL to backend instead of original URL")
+	fs.StringVar(&flagYtDLPCookies, "yt-dlp-cookies", "", "path to cookies file to pass to yt-dlp (--cookies)")
+	fs.StringVar(&flagYtDLPCookiesFromBrowser, "yt-dlp-cookies-from-browser", "", "browser spec to pass to yt-dlp (--cookies-from-browser)")
 	fs.BoolVar(&flagExplain, "explain", false, "print how each URL will be handled and exit without contacting backends")
 
 	if err := fs.Parse(args); err != nil {
@@ -220,9 +224,16 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	// Effective yt-dlp settings: config provides defaults, CLI flags can override.
 	useYtDLP := cfg != nil && cfg.UseYtDLP
 	ytDLPUseDirectURL := cfg != nil && cfg.YtDLPUseDirectURL
+	var ytDLPCookies, ytDLPCookiesFromBrowser string
+	if cfg != nil {
+		ytDLPCookies = cfg.YtDLPCookies
+		ytDLPCookiesFromBrowser = cfg.YtDLPCookiesFromBrowser
+	}
 
 	useYtDLPFlagChanged := false
 	ytDLPDirectFlagChanged := false
+	ytDLPCookiesFlagChanged := false
+	ytDLPCookiesFromBrowserFlagChanged := false
 	reqLangFlagChanged := false
 	backendFlagChanged := false
 	voiceStyleFlagChanged := false
@@ -234,6 +245,14 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	if f := fs.Lookup("yt-dlp-use-direct-url"); f != nil && f.Changed {
 		ytDLPUseDirectURL = flagYtDLPUseDirectURL
 		ytDLPDirectFlagChanged = true
+	}
+	if f := fs.Lookup("yt-dlp-cookies"); f != nil && f.Changed {
+		ytDLPCookies = flagYtDLPCookies
+		ytDLPCookiesFlagChanged = true
+	}
+	if f := fs.Lookup("yt-dlp-cookies-from-browser"); f != nil && f.Changed {
+		ytDLPCookiesFromBrowser = flagYtDLPCookiesFromBrowser
+		ytDLPCookiesFromBrowserFlagChanged = true
 	}
 
 	// Check availability of yt-dlp once, so that explicit --use-yt-dlp or
@@ -301,12 +320,14 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		useYtDLPForURL, ytDLPUseDirectURLForURL := applySourceRules(u, sourceRules, useYtDLP && ytDLPAvailable, ytDLPUseDirectURL, useYtDLPFlagChanged, ytDLPDirectFlagChanged)
 		effectiveReqLang, effectiveBackend = applySourceLangAndBackend(u, sourceRules, effectiveReqLang, effectiveBackend, reqLangFlagChanged, backendFlagChanged)
 		effectiveVoiceStyle = applySourceVoiceStyle(u, sourceRules, effectiveVoiceStyle, voiceStyleFlagChanged)
+		cookies, cookiesFromBrowser := applySourceYtDLPCookies(u, sourceRules, ytDLPCookies, ytDLPCookiesFromBrowser, ytDLPCookiesFlagChanged, ytDLPCookiesFromBrowserFlagChanged)
 
 		// Optionally use yt-dlp to resolve a direct media URL and obtain duration.
 		if useYtDLPForURL {
-			if d, err := getVideoDurationWithYtDLP(u); err != nil {
+			if d, err := getVideoDurationWithYtDLP(u, cookies, cookiesFromBrowser); err != nil {
 				if flagDebug && !flagSilent {
 					fmt.Fprintf(os.Stderr, "[debug] yt-dlp failed to get duration for %s: %v\n", u, err)
+					fmt.Fprintln(os.Stderr, "[debug] hint: yt-dlp errors for YouTube often mean that authentication cookies are required; see https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp and the \"Проблемы с yt-dlp\" section in the vot README.")
 				}
 			} else {
 				durationSec = d
@@ -315,9 +336,10 @@ func translateMain(parent *flag.FlagSet, args []string) {
 				}
 			}
 
-			if directURL, err := resolveDirectURLWithYtDLP(u); err != nil {
+			if directURL, err := resolveDirectURLWithYtDLP(u, cookies, cookiesFromBrowser); err != nil {
 				if flagDebug && !flagSilent {
 					fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolution failed for %s: %v\n", u, err)
+					fmt.Fprintln(os.Stderr, "[debug] hint: yt-dlp errors for YouTube often mean that authentication cookies are required; see https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp and the \"Проблемы с yt-dlp\" section in the vot README.")
 				}
 			} else {
 				if flagDebug && !flagSilent {
@@ -353,16 +375,16 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		}
 
 		if flagDebug && !flagSilent {
-			fmt.Fprintf(os.Stderr, "[debug] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v\n",
-				u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL)
+			fmt.Fprintf(os.Stderr, "[debug] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v yt_dlp_cookies=%s yt_dlp_cookies_from_browser=%s\n",
+				u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser)
 		}
 
 		// In explain mode we only show how the URL would be processed and skip
 		// any calls to Yandex backends.
 		if flagExplain {
 			if !flagSilent {
-				fmt.Fprintf(os.Stderr, "[explain] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v\n",
-					u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL)
+				fmt.Fprintf(os.Stderr, "[explain] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v yt_dlp_cookies=%s yt_dlp_cookies_from_browser=%s\n",
+					u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser)
 			}
 			cancel()
 			continue
@@ -428,7 +450,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 // resolveDirectURLWithYtDLP tries to obtain a direct media URL for the given
 // video URL using the local yt-dlp binary (if present in PATH).
-func resolveDirectURLWithYtDLP(videoURL string) (string, error) {
+func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string) (string, error) {
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		return "", fmt.Errorf("yt-dlp not found in PATH: %w", err)
 	}
@@ -436,7 +458,16 @@ func resolveDirectURLWithYtDLP(videoURL string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "yt-dlp", "-g", videoURL)
+	args := []string{"-g"}
+	if cookiesFile != "" {
+		args = append(args, "--cookies", cookiesFile)
+	}
+	if cookiesFromBrowser != "" {
+		args = append(args, "--cookies-from-browser", cookiesFromBrowser)
+	}
+	args = append(args, videoURL)
+
+	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("yt-dlp failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
@@ -471,7 +502,7 @@ func resolveDirectURLWithYtDLP(videoURL string) (string, error) {
 
 // getVideoDurationWithYtDLP asks yt-dlp to print video duration (in seconds)
 // for the given URL and parses it into float64.
-func getVideoDurationWithYtDLP(videoURL string) (float64, error) {
+func getVideoDurationWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string) (float64, error) {
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		return 0, fmt.Errorf("yt-dlp not found in PATH: %w", err)
 	}
@@ -479,7 +510,16 @@ func getVideoDurationWithYtDLP(videoURL string) (float64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "yt-dlp", "--print", "duration", videoURL)
+	args := []string{"--print", "duration"}
+	if cookiesFile != "" {
+		args = append(args, "--cookies", cookiesFile)
+	}
+	if cookiesFromBrowser != "" {
+		args = append(args, "--cookies-from-browser", cookiesFromBrowser)
+	}
+	args = append(args, videoURL)
+
+	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("yt-dlp failed to get duration: %w (output: %s)", err, strings.TrimSpace(string(output)))

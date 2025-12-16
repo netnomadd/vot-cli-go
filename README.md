@@ -74,7 +74,9 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
 - `--poll-interval` — интервал между запросами статуса (секунды, минимум 30);
 - `--poll-attempts` — максимальное количество попыток опроса;
 - `--use-yt-dlp` — использовать локальный `yt-dlp` (если доступен в `PATH`) для получения прямых медиассылок и метаданных (в том числе длительности ролика);
-- `--yt-dlp-use-direct-url` — при использовании `yt-dlp` передавать в backend прямой медиa-URL, а не оригинальный адрес страницы.
+- `--yt-dlp-use-direct-url` — при использовании `yt-dlp` передавать в backend прямой медиa-URL, а не оригинальный адрес страницы;
+- `--yt-dlp-cookies` — путь к cookies-файлу, который будет передан в `yt-dlp` как `--cookies` (полезно для авторизованных/защищённых видео);
+- `--yt-dlp-cookies-from-browser` — строка с описанием браузера/профиля для `yt-dlp --cookies-from-browser` (например, `firefox` или `chrome:Profile 1`).
 
 Флаги верхнего уровня:
 
@@ -102,6 +104,8 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
   "default_response_lang": "ru",
   "use_yt_dlp": true,
   "yt_dlp_use_direct_url": true,
+  "yt_dlp_cookies": "/path/to/cookies.txt",
+  "yt_dlp_cookies_from_browser": "firefox",
   "source_rules": [
     {
       "pattern": "(?i)^https?://www\\.zdf\\.de/play/",
@@ -120,11 +124,13 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
 - `default_response_lang` — язык перевода по умолчанию, если флаг `--response-lang` не указан (по умолчанию `ru` в бинарнике; это поле позволяет сменить его, не меняя CLI-аргументы);
 - `use_yt_dlp` — при `true` CLI может использовать локально установленный `yt-dlp` (если он найден в `PATH`) для получения прямых медиассылок/метаданных;
 - `yt_dlp_use_direct_url` — при `true` backends получают уже «распакованный» прямой URL от `yt-dlp`, при `false` — исходный URL (напр. страница YouTube);
-- `source_rules` — (опционально) массив правил для конкретных источников: каждое правило содержит регулярное выражение `pattern`, флаги `use_yt_dlp`/`yt_dlp_use_direct_url` и, при необходимости, поля `request_lang`/`backend`/`voice_style`, позволяя тонко настраивать поведение для разных сайтов без перекомпиляции бинарника.
+- `yt_dlp_cookies` — путь к cookies-файлу, который будет передан в `yt-dlp` как `--cookies` (для сайтов, где без авторизации/куков доступ ограничен);
+- `yt_dlp_cookies_from_browser` — значение для `yt-dlp --cookies-from-browser` (например, `firefox` или `chrome:Profile 1`), если удобнее брать cookies из браузера;
+- `source_rules` — (опционально) массив правил для конкретных источников: каждое правило содержит регулярное выражение `pattern`, флаги `use_yt_dlp`/`yt_dlp_use_direct_url` и, при необходимости, поля `request_lang`/`backend`/`voice_style`/`yt_dlp_cookies`/`yt_dlp_cookies_from_browser`, позволяя тонко настраивать поведение для разных сайтов без перекомпиляции бинарника.
 
 ### Правила источников (`source_rules`)
 
-Правила источников применяются **поверх** базовых настроек: сначала берутся значения из конфига (`use_yt_dlp`, `yt_dlp_use_direct_url`, `backend`, `request_lang`), затем для каждого URL последовательно применяются регулярные выражения из `source_rules`, а уже **поверх всего** работают явные CLI-флаги (которые всегда имеют приоритет). Для `voice_style` допустимы значения `live` и `tts`; при неверном значении из правила CLI молча откатывается к `live` (с записью в debug-лог при `--debug`).
+Правила источников применяются **поверх** базовых настроек: сначала берутся значения из конфига (`use_yt_dlp`, `yt_dlp_use_direct_url`, `backend`, `request_lang`, `yt_dlp_cookies`, `yt_dlp_cookies_from_browser`), затем для каждого URL последовательно применяются регулярные выражения из `source_rules`, а уже **поверх всего** работают явные CLI-флаги (которые всегда имеют приоритет). Для `voice_style` допустимы значения `live` и `tts`; при неверном значении из правила CLI молча откатывается к `live` (с записью в debug-лог при `--debug`).
 В бинарник также зашит небольшой набор дефолтных правил для известных источников (YouTube, Invidious/Piped, ZDF), который включён до пользовательских правил; за счёт этого вы можете переопределять встроенное поведение добавлением своих записей в `source_rules`.
 Если какое-то регулярное выражение в `source_rules` не компилируется, оно тихо игнорируется и не ломает запуск утилиты.
 
@@ -151,6 +157,7 @@ vot translate --response-lang=ru "https://youtu.be/..."
 Из вывода берутся как минимум прямой медиa-URL и длительность ролика; длительность дополнительно отправляется в backend (direct/worker), что помогает сервису точнее оценивать объём работы и таймауты.
 Если включён `yt_dlp_use_direct_url` (или флаг `--yt-dlp-use-direct-url`), в запрос к backend уходит уже «распакованный» медиa-URL; иначе — исходный адрес страницы (YouTube, Invidious и т.п.).
 Если `yt-dlp` не найден или завершается с ошибкой, утилита продолжает работу как без него.
+Если `yt-dlp` падает на YouTube/подобных сайтах с сообщениями про необходимость авторизации, можно задать cookies либо через флаги `--yt-dlp-cookies`/`--yt-dlp-cookies-from-browser`, либо через одноимённые поля в конфиге/`source_rules`.
 Обратите внимание, что backend’ы `direct` и `worker` не гарантируют поддержку любых прямых медиассылок: часть URL'ов может не приниматься или обрабатываться с ошибкой.
 
 ## Отличия backend'ов `direct` и `worker`
@@ -242,7 +249,9 @@ VOT_LANG=ru vot --backend=worker --config ~/.config/vot-cli/config.json translat
   "yandex_token": "ya-0.AQA...",
   "default_response_lang": "ru",
   "use_yt_dlp": true,
-  "yt_dlp_use_direct_url": false
+  "yt_dlp_use_direct_url": false,
+  "yt_dlp_cookies": "/path/to/cookies.txt",
+  "yt_dlp_cookies_from_browser": "firefox"
 }
 ```
 
@@ -262,7 +271,8 @@ VOT_LANG=ru vot --backend=worker --config ~/.config/vot-cli/config.json translat
       "use_yt_dlp": true,
       "yt_dlp_use_direct_url": false,
       "backend": "worker",
-      "voice_style": "live"
+      "voice_style": "live",
+      "yt_dlp_cookies_from_browser": "firefox"
     },
     {
       "pattern": "(?i)^https?://(www\\.)?youtu\\.be/",

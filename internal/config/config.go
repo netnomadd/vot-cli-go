@@ -29,12 +29,14 @@ import (
 // Rules from config are applied after built-in defaults, so they can override
 // behaviour for matching sites.
 type SourceRuleConfig struct {
-	Pattern           string  `json:"pattern"`
-	UseYtDLP          *bool   `json:"use_yt_dlp,omitempty"`
-	YtDLPUseDirectURL *bool   `json:"yt_dlp_use_direct_url,omitempty"`
-	RequestLang       *string `json:"request_lang,omitempty"`
-	Backend           *string `json:"backend,omitempty"`
-	VoiceStyle        *string `json:"voice_style,omitempty"`
+	Pattern               string  `json:"pattern"`
+	UseYtDLP              *bool   `json:"use_yt_dlp,omitempty"`
+	YtDLPUseDirectURL     *bool   `json:"yt_dlp_use_direct_url,omitempty"`
+	YtDLPCookies          *string `json:"yt_dlp_cookies,omitempty"`
+	YtDLPCookiesFromBrowser *string `json:"yt_dlp_cookies_from_browser,omitempty"`
+	RequestLang           *string `json:"request_lang,omitempty"`
+	Backend               *string `json:"backend,omitempty"`
+	VoiceStyle            *string `json:"voice_style,omitempty"`
 }
 
 // Config represents user-level configuration for vot-cli-go.
@@ -51,8 +53,10 @@ type Config struct {
 
 	// Optional integration with yt-dlp (if installed in the system).
 	// These flags only take effect in features that explicitly support yt-dlp.
-	UseYtDLP          bool `json:"use_yt_dlp"`
-	YtDLPUseDirectURL bool `json:"yt_dlp_use_direct_url"`
+	UseYtDLP              bool   `json:"use_yt_dlp"`
+	YtDLPUseDirectURL     bool   `json:"yt_dlp_use_direct_url"`
+	YtDLPCookies          string `json:"yt_dlp_cookies"`
+	YtDLPCookiesFromBrowser string `json:"yt_dlp_cookies_from_browser"`
 
 	// Optional per-source rules that can tweak yt-dlp usage and direct URL
 	// handling depending on the URL pattern. When empty, only built-in rules
