@@ -10,7 +10,8 @@ func TestLoadExplicitPathOK(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	data := []byte(`{"user_agent":"ua","yandex_hmac_key":"hmac","yandex_token":"token","default_response_lang":"en","use_yt_dlp":true,"yt_dlp_use_direct_url":true,
-		"source_rules":[{"pattern":"(?i)^https?://example.com/","use_yt_dlp":true,"yt_dlp_use_direct_url":false,"request_lang":"de","backend":"worker","voice_style":"tts"}]}`)
+		"source_rules":[{"patterns":["(?i)^https?://example.com/","(?i)^https?://alt.example.com/"],"use_yt_dlp":true,"yt_dlp_use_direct_url":false,"request_lang":"de","backend":"worker","voice_style":"tts",
+		"rewrite":[{"pattern":"(?i)^https?://alt.example.com/(.*)","replace":"https://example.com/$1"}]}]}`)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
@@ -35,8 +36,11 @@ func TestLoadExplicitPathOK(t *testing.T) {
 		t.Fatalf("expected 1 source rule, got %d", len(cfg.SourceRules))
 	}
 	rule := cfg.SourceRules[0]
-	if rule.Pattern == "" || rule.UseYtDLP == nil || rule.YtDLPUseDirectURL == nil || rule.RequestLang == nil || rule.Backend == nil || rule.VoiceStyle == nil {
+	if len(rule.Patterns) == 0 || rule.UseYtDLP == nil || rule.YtDLPUseDirectURL == nil || rule.RequestLang == nil || rule.Backend == nil || rule.VoiceStyle == nil {
 		t.Fatalf("source rule not loaded correctly: %+v", rule)
+	}
+	if len(rule.Rewrite) != 1 || rule.Rewrite[0].Pattern == "" || rule.Rewrite[0].Replace == "" {
+		t.Fatalf("rewrite rules not loaded correctly: %+v", rule.Rewrite)
 	}
 }
 

@@ -14,29 +14,52 @@ import (
 // backend / language defaults. It is configured in config.json to avoid
 // hard-coding site-specific behaviour in the binary.
 //
-// All fields are optional except Pattern; boolean and string fields are
-// pointers so that "unset" differs from an explicit value.
+// All fields are optional except Pattern/Patterns; boolean and string fields
+// are pointers so that "unset" differs from an explicit value.
 // Example JSON entry:
 // {
-//   "pattern": "(?i)^https?://www\\.zdf\\.de/play/",
+//   "patterns": [
+//     "(?i)^https?://www\\.zdf\\.de/play/",
+//     "(?i)^https?://zdf\\.example/alternate/"
+//   ],
 //   "use_yt_dlp": true,
 //   "yt_dlp_use_direct_url": true,
 //   "request_lang": "de",
 //   "backend": "worker",
-//   "voice_style": "tts"
+//   "voice_style": "tts",
+//   "rewrite": [
+//     { "pattern": "(?i)^https?://zdf\\.example/(.*)", "replace": "https://www.zdf.de/play/$1" }
+//   ]
 // }
 //
 // Rules from config are applied after built-in defaults, so they can override
 // behaviour for matching sites.
 type SourceRuleConfig struct {
-	Pattern               string  `json:"pattern"`
-	UseYtDLP              *bool   `json:"use_yt_dlp,omitempty"`
-	YtDLPUseDirectURL     *bool   `json:"yt_dlp_use_direct_url,omitempty"`
-	YtDLPCookies          *string `json:"yt_dlp_cookies,omitempty"`
+	// Pattern is a single regex; Patterns allows specifying multiple regexes
+	// within one logical rule. Both are supported for backwards compatibility.
+	Pattern  string   `json:"pattern"`
+	Patterns []string `json:"patterns,omitempty"`
+
+	UseYtDLP                *bool   `json:"use_yt_dlp,omitempty"`
+	YtDLPUseDirectURL       *bool   `json:"yt_dlp_use_direct_url,omitempty"`
+	YtDLPCookies            *string `json:"yt_dlp_cookies,omitempty"`
 	YtDLPCookiesFromBrowser *string `json:"yt_dlp_cookies_from_browser,omitempty"`
-	RequestLang           *string `json:"request_lang,omitempty"`
-	Backend               *string `json:"backend,omitempty"`
-	VoiceStyle            *string `json:"voice_style,omitempty"`
+	RequestLang             *string `json:"request_lang,omitempty"`
+	Backend                 *string `json:"backend,omitempty"`
+	VoiceStyle              *string `json:"voice_style,omitempty"`
+
+	// Rewrite optionally contains one or more rewrite rules that can transform
+	// incoming URLs before they are classified / passed to yt-dlp or backends.
+	// Patterns in Rewrite are regular expressions; Replace is the replacement
+	// string in Go's regexp.ReplaceAllString semantics.
+	Rewrite []RewriteRuleConfig `json:"rewrite,omitempty"`
+}
+
+// RewriteRuleConfig describes a single URL rewrite rule used inside a
+// SourceRuleConfig.
+type RewriteRuleConfig struct {
+	Pattern string `json:"pattern"`
+	Replace string `json:"replace"`
 }
 
 // Config represents user-level configuration for vot-cli-go.

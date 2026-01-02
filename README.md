@@ -108,11 +108,21 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
   "yt_dlp_cookies_from_browser": "firefox",
   "source_rules": [
     {
-      "pattern": "(?i)^https?://www\\.zdf\\.de/play/",
+      "patterns": [
+        "(?i)^https?://example.com/",
+        "(?i)^https?://alt.example.com/"
+      ],
       "use_yt_dlp": true,
-      "yt_dlp_use_direct_url": true,
+      "yt_dlp_use_direct_url": false,
       "request_lang": "de",
-      "backend": "worker"
+      "backend": "worker",
+      "voice_style": "tts",
+      "rewrite": [
+        {
+          "pattern": "(?i)^https?://alt.example.com/(.*)",
+          "replace": "https://example.com/$1"
+        }
+      ]
     }
   ]
 }
@@ -126,11 +136,12 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
 - `yt_dlp_use_direct_url` — при `true` backends получают уже «распакованный» прямой URL от `yt-dlp`, при `false` — исходный URL (напр. страница YouTube);
 - `yt_dlp_cookies` — путь к cookies-файлу, который будет передан в `yt-dlp` как `--cookies` (для сайтов, где без авторизации/куков доступ ограничен);
 - `yt_dlp_cookies_from_browser` — значение для `yt-dlp --cookies-from-browser` (например, `firefox` или `chrome:Profile 1`), если удобнее брать cookies из браузера;
-- `source_rules` — (опционально) массив правил для конкретных источников: каждое правило содержит регулярное выражение `pattern`, флаги `use_yt_dlp`/`yt_dlp_use_direct_url` и, при необходимости, поля `request_lang`/`backend`/`voice_style`/`yt_dlp_cookies`/`yt_dlp_cookies_from_browser`, позволяя тонко настраивать поведение для разных сайтов без перекомпиляции бинарника.
+- `source_rules` — (опционально) массив правил для конкретных источников: каждое правило содержит регулярное выражение `pattern` или массив `patterns` (для нескольких URL), флаги `use_yt_dlp`/`yt_dlp_use_direct_url` и, при необходимости, поля `request_lang`/`backend`/`voice_style`/`yt_dlp_cookies`/`yt_dlp_cookies_from_browser` и массив переписывателей `rewrite`, позволяя тонко настраивать поведение для разных сайтов без перекомпиляции бинарника.
 
 ### Правила источников (`source_rules`)
 
 Правила источников применяются **поверх** базовых настроек: сначала берутся значения из конфига (`use_yt_dlp`, `yt_dlp_use_direct_url`, `backend`, `request_lang`, `yt_dlp_cookies`, `yt_dlp_cookies_from_browser`), затем для каждого URL последовательно применяются регулярные выражения из `source_rules`, а уже **поверх всего** работают явные CLI-флаги (которые всегда имеют приоритет). Для `voice_style` допустимы значения `live` и `tts`; при неверном значении из правила CLI молча откатывается к `live` (с записью в debug-лог при `--debug`).
+Одно правило может содержать одиночный `pattern` или массив `patterns` для разных URL, а массив `rewrite` внутри правила задаёт дополнительные regexp-переписывания (`pattern`/`replace` в терминах Go `regexp.ReplaceAllString`) и применяется к уже совпавшим URL перед передачей их в yt-dlp/backend.
 В бинарник также зашит небольшой набор дефолтных правил для известных источников (YouTube, Invidious/Piped, ZDF), который включён до пользовательских правил; за счёт этого вы можете переопределять встроенное поведение добавлением своих записей в `source_rules`.
 Если какое-то регулярное выражение в `source_rules` не компилируется, оно тихо игнорируется и не ломает запуск утилиты.
 
