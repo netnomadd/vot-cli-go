@@ -199,3 +199,186 @@
 - `file://*/*.mp4*` → `(?i)^file://[^/]+/.*\.mp4.*`
 - `file://*/*.webm*` → `(?i)^file://[^/]+/.*\.webm.*`
 - `*://accounts.youtube.com/*` → `(?i)^https?://accounts\.youtube\.com/.*`
+
+## Группировка по видеохостингам и фронтендам
+
+Ниже — удобная группировка уже перечисленных выше паттернов по основным видеоплатформам и их альтернативным фронтендам/инстансам.
+Эти группы можно использовать как подсказку при настройке `source_rules` (например, чтобы одним правилом покрывать сразу несколько инстансов одного сервиса).
+
+### YouTube и совместимые фронтенды
+
+**Основной домен YouTube**
+- `*.youtube.com/*`
+- `*.youtube-nocookie.com/*`
+- `*.youtubekids.com/*`
+- `youtube.googleapis.com/embed/*`
+
+**Invidious / Yewtu / другие YouTube-фронтенды**
+- `*.yewtu.be/*`
+- `yt.artemislena.eu/*`
+- `invidious.flokinet.to/*`
+- `iv.melmac.space/*`
+- `inv.nadeko.net/*`
+- `inv.tux.pizza/*`
+- `invidious.private.coffee/*`
+- `yt.drgnz.club/*`
+- `vid.puffyan.us/*`
+- `invidious.dhusch.de/*`
+
+**Piped и совместимые инстансы**
+- `*.piped.video/*`
+- `piped.tokhmi.xyz/*`
+- `piped.moomoo.me/*`
+- `piped.syncpundit.io/*`
+- `piped.mha.fi/*`
+- `watch.whatever.social/*`
+- `piped.garudalinux.org/*`
+- `efy.piped.pages.dev/*`
+- `watch.leptons.xyz/*`
+- `piped.lunar.icu/*`
+- `yt.dc09.ru/*`
+- `piped.mint.lgbt/*`
+- `*.il.ax/*`
+- `piped.privacy.com.de/*`
+- `piped.esmailelbob.xyz/*`
+- `piped.projectsegfau.lt/*`
+- `piped.in.projectsegfau.lt/*`
+- `piped.us.projectsegfau.lt/*`
+- `piped.privacydev.net/*`
+- `piped.palveluntarjoaja.eu/*`
+- `piped.smnz.de/*`
+- `piped.adminforge.de/*`
+- `piped.qdi.fi/*`
+- `piped.hostux.net/*`
+- `piped.chauvet.pro/*`
+- `piped.jotoma.de/*`
+- `piped.pfcd.me/*`
+- `piped.frontendfriendly.xyz/*`
+
+**Poketube / Poke-инстансы**
+- `*.poketube.fun/*`
+- `pt.sudovanilla.org/*`
+- `poke.ggtyler.dev/*`
+- `poke.uk2.littlekai.co.uk/*`
+- `poke.blahai.gay/*`
+- `*.ricktube.ru/*`
+
+### TikTok и фронтенды
+
+**Официальные домены**
+- `*.tiktok.com/*`
+- `*.douyin.com/*`
+
+**ProxiTok / Tok / альтернативные фронтенды TikTok**
+- `proxitok.pabloferreiro.es/*`
+- `proxitok.pussthecat.org/*`
+- `tok.habedieeh.re/*`
+- `proxitok.esmailelbob.xyz/*`
+- `proxitok.privacydev.net/*`
+- `tok.artemislena.eu/*`
+- `tok.adminforge.de/*`
+- `tt.vern.cc/*`
+- `cringe.whatever.social/*`
+- `proxitok.lunar.icu/*`
+- `proxitok.privacy.com.de/*`
+
+### Twitch и стриминговые платформы
+
+- `*.twitch.tv/*`
+- `trovo.live/*`
+- `*.kick.com/*`
+
+### Российские соцсети и видеохостинги
+
+- `*.vk.com/*`
+- `*.vkvideo.ru/*`
+- `*.vk.ru/*`
+- `*.ok.ru/*`
+- `*.rutube.ru/*`
+- `*.dzen.ru/*`
+- `my.mail.ru/*`
+
+### Международные видеохостинги
+
+- `*.vimeo.com/*`
+- `*.bilibili.com/*`
+- `*.dailymotion.com/*`
+- `rumble.com/*`
+- `*.bitchute.com/*`
+- `odysee.com/*`
+- `*.newgrounds.com/*`
+- `*.youku.com/*`
+- `*.archive.org/*`
+
+### Социальные сети и контент-платформы
+
+- `*.twitter.com/*`, `*.x.com/*`
+- `*.facebook.com/*`
+- `*.9gag.com/*`
+- `*.reddit.com/*`
+- `*.linkedin.com/*`
+- `*.patreon.com/*`
+- `web.telegram.org/k/*`
+
+### Образовательные платформы и документация
+
+- `*.coursera.org/*`
+- `*.udemy.com/course/*`
+- `*.egghead.io/*`
+- `learning.sap.com/*`
+- `mylearn.oracle.com/*`
+- `learn.deeplearning.ai/*`, `learn-staging.deeplearning.ai/*`, `learn-dev.deeplearning.ai/*`
+- `*.netacad.com/content/i2cs/*`
+- `developer.apple.com/*`
+- `dev.epicgames.com/*`
+- `*.artstation.com/learning/*`
+- `learning.sap.com/*`
+
+### PeerTube и совместимые инстансы
+
+- `peertube.1312.media/*`
+- `tube.shanti.cafe/*`
+- `*.bee-tube.fr/*`
+- `video.sadmin.io/*`
+- `*.dalek.zone/*`
+- `review.peertube.biz/*`
+- `*.peervideo.club/*`
+- `tube.la-dina.net/*`
+- `peertube.tmp.rcp.tf/*`
+- `*.peertube.su/*`
+- `video.blender.org/*`
+- `videos.viorsan.com/*`
+- `tube-sciences-technologies.apps.education.fr/*`
+- `tube-numerique-educatif.apps.education.fr/*`
+- `tube-arts-lettres-sciences-humaines.apps.education.fr/*`
+- `*.beetoons.tv/*`
+- `comics.peertube.biz/*`
+- `*.makertube.net/*`
+
+### Яндекс.Диск и вспомогательные сервисы
+
+- `disk.yandex.*` (все паттерны `disk.yandex.ru`, `.kz`, `.com`, `.com.am`, `.com.ge`, `.com.tr`, `.by`, `.az`, `.co.il`, `.ee`, `.lt`, `.lv`, `.md`, `.net`, `.tj`, `.tm`, `.uz`)
+- `t2mc.toil.cc/*`
+
+### Прочие видеосайты и хостинги
+
+- `*.imdb.com/*`
+- `*.kodik.info/*`, `*.kodik.biz/*`, `*.kodik.cc/*`
+- `*.rt.com/*`
+- `*.ign.com/*`
+- `*.banned.video/*`, `*.madmaxworld.tv/*`
+- `*.loom.com/*`
+- `*.cloudflarestream.com/*`
+- `*.bitview.net/*`
+- `*.kickstarter.com/*`
+- `*.thisvid.com/*`
+- `*.bunkr.*` (все перечисленные домены bunkr)
+- `*.beetoons.tv/*`
+
+### Вспомогательные общие паттерны
+
+- `*://*/*.mp4*`
+- `*://*/*.webm*`
+
+> Все перечисленные группы являются лишь логической надстройкой над базовым списком `@match`/`@exclude` выше и не влияют на фактические regexp.
+> При добавлении новых источников в конфиг `source_rules` имеет смысл ориентироваться на эти группы, чтобы одинаково обрабатывать альтернативные инстансы одного и того же видеохостинга.

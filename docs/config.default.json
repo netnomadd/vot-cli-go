@@ -1,0 +1,196 @@
+{
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 YaBrowser/25.4.0.0 Safari/537.36",
+  "yandex_hmac_key": "bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf",
+  "yandex_token": "ya-0.AQA...", 
+  "default_response_lang": "ru",
+
+  "use_yt_dlp": true,
+  "yt_dlp_use_direct_url": false,
+  "yt_dlp_cookies": "",
+  "yt_dlp_cookies_from_browser": "",
+
+  "source_rules": [
+    {
+      "patterns": [
+        "(?i)^https?://(www\\.)?youtube\\.com/watch",
+        "(?i)^https?://(www\\.)?youtube\\.com/shorts/",
+        "(?i)^https?://(www\\.)?youtu\\.be/"
+      ],
+      "use_yt_dlp": true,
+      "yt_dlp_use_direct_url": false,
+      "backend": "worker",
+      "voice_style": "live"
+    },
+    {
+      "patterns": [
+        "(?i)^https?://([^/]+\\.)?(invidious|piped)\\.[^/]+/watch",
+        "(?i)^https?://([^/]+\\.)?yewtu\\.be/watch",
+        "(?i)^https?://yt\\.artemislena\\.eu/watch",
+        "(?i)^https?://yt\\.drgnz\\.club/watch",
+        "(?i)^https?://vid\\.puffyan\\.us/watch",
+        "(?i)^https?://yt\\.dc09\\.ru/watch",
+        "(?i)^https?://watch\\.whatever\\.social/watch"
+      ],
+      "use_yt_dlp": true,
+      "yt_dlp_use_direct_url": false,
+      "backend": "worker",
+      "voice_style": "live",
+      "rewrite": [
+        {
+          "pattern": "(?i)^https?://[^/]+/watch\\?v=([\\w-]+).*$",
+          "replace": "https://www.youtube.com/watch?v=$1"
+        },
+        {
+          "pattern": "(?i)^https?://[^/]+/shorts/([\\w-]+).*$",
+          "replace": "https://www.youtube.com/watch?v=$1"
+        }
+      ]
+    },
+    {
+      "pattern": "(?i)^https?://www\\.zdf\\.de/play/",
+      "use_yt_dlp": true,
+      "yt_dlp_use_direct_url": true,
+      "request_lang": "de",
+      "backend": "worker",
+      "voice_style": "tts"
+    },
+    {
+      "patterns": [
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*twitch\\.tv/.*",
+        "(?i)^https?://trovo\\.live/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*kick\\.com/.*"
+      ],
+      "use_yt_dlp": true,
+      "backend": "worker",
+      "voice_style": "live"
+    },
+    {
+      "patterns": [
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*vk\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*vkvideo\\.ru/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*vk\\.ru/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*ok\\.ru/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*rutube\\.ru/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*dzen\\.ru/.*",
+        "(?i)^https?://my\\.mail\\.ru/.*"
+      ],
+      "use_yt_dlp": true,
+      "backend": "worker",
+      "voice_style": "live"
+    },
+    {
+      "patterns": [
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*vimeo\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*bilibili\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*dailymotion\\.com/.*",
+        "(?i)^https?://rumble\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*bitchute\\.com/.*",
+        "(?i)^https?://odysee\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*newgrounds\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*youku\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*archive\\.org/.*"
+      ],
+      "use_yt_dlp": true,
+      "backend": "worker",
+      "voice_style": "live"
+    },
+    {
+      "patterns": [
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*twitter\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*x\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*facebook\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*9gag\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*reddit\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*linkedin\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*patreon\\.com/.*",
+        "(?i)^https?://web\\.telegram\\.org/k/.*"
+      ],
+      "use_yt_dlp": true,
+      "backend": "worker",
+      "voice_style": "live"
+    },
+    {
+      "patterns": [
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*coursera\\.org/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*udemy\\.com/course/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*egghead\\.io/.*",
+        "(?i)^https?://learning\\.sap\\.com/.*",
+        "(?i)^https?://mylearn\\.oracle\\.com/.*",
+        "(?i)^https?://learn\\.deeplearning\\.ai/.*",
+        "(?i)^https?://learn-staging\\.deeplearning\\.ai/.*",
+        "(?i)^https?://learn-dev\\.deeplearning\\.ai/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*netacad\\.com/content/i2cs/.*",
+        "(?i)^https?://developer\\.apple\\.com/.*",
+        "(?i)^https?://dev\\.epicgames\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*artstation\\.com/learning/.*"
+      ],
+      "use_yt_dlp": true,
+      "backend": "worker",
+      "voice_style": "live"
+    },
+    {
+      "patterns": [
+        "(?i)^https?://peertube\\.1312\\.media/.*",
+        "(?i)^https?://tube\\.shanti\\.cafe/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*bee-tube\\.fr/.*",
+        "(?i)^https?://video\\.sadmin\\.io/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*dalek\\.zone/.*",
+        "(?i)^https?://review\\.peertube\\.biz/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*peervideo\\.club/.*",
+        "(?i)^https?://tube\\.la-dina\\.net/.*",
+        "(?i)^https?://peertube\\.tmp\\.rcp\\.tf/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*peertube\\.su/.*",
+        "(?i)^https?://video\\.blender\\.org/.*",
+        "(?i)^https?://videos\\.viorsan\\.com/.*",
+        "(?i)^https?://tube-sciences-technologies\\.apps\\.education\\.fr/.*",
+        "(?i)^https?://tube-numerique-educatif\\.apps\\.education\\.fr/.*",
+        "(?i)^https?://tube-arts-lettres-sciences-humaines\\.apps\\.education\\.fr/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*beetoons\\.tv/.*",
+        "(?i)^https?://comics\\.peertube\\.biz/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*makertube\\.net/.*"
+      ],
+      "use_yt_dlp": true,
+      "backend": "worker",
+      "voice_style": "live"
+    },
+    {
+      "patterns": [
+        "(?i)^https?://disk\\.yandex\\.[^/]+/.*",
+        "(?i)^https?://t2mc\\.toil\\.cc/.*"
+      ],
+      "use_yt_dlp": false,
+      "backend": "direct",
+      "voice_style": "live"
+    },
+    {
+      "patterns": [
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*imdb\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*kodik\\.info/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*kodik\\.biz/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*kodik\\.cc/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*rt\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*ign\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*banned\\.video/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*madmaxworld\\.tv/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*loom\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*cloudflarestream\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*bitview\\.net/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*kickstarter\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*thisvid\\.com/.*",
+        "(?i)^https?://(?:[a-z0-9-]+\\.)*bunkr\\.[a-z0-9.-]+/.*"
+      ],
+      "use_yt_dlp": true,
+      "backend": "worker",
+      "voice_style": "live"
+    },
+    {
+      "patterns": [
+        "(?i)^https?://[^/]+/.*\\.mp4.*",
+        "(?i)^https?://[^/]+/.*\\.webm.*"
+      ],
+      "use_yt_dlp": false,
+      "backend": "direct",
+      "voice_style": "live"
+    }
+  ]
+}
