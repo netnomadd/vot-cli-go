@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/netnomadd/vot-cli-go/internal/config"
+	"github.com/netnomadd/vot-cli-go/internal/yandexclient"
 )
 
 func TestSourceRuleHelpersApplyConfigAndRewrite(t *testing.T) {
@@ -107,5 +108,21 @@ func TestSourceRuleHelpersRespectExplicitFlags(t *testing.T) {
 	cookies, cookiesFromBrowser := applySourceYtDLPCookies(url, rules, "base.txt", "chrome", true, true)
 	if cookies != "base.txt" || cookiesFromBrowser != "chrome" {
 		t.Fatalf("explicit CLI cookies should win, got (%q, %q)", cookies, cookiesFromBrowser)
+	}
+}
+
+func TestBuiltInSourceRulesFollowWorkerAvailability(t *testing.T) {
+	rules := buildSourceRulesFromConfig(&config.Config{})
+
+	_, backend := applySourceLangAndBackend("https://youtu.be/example", rules, "", "", false, false)
+	if yandexclient.WorkerBackendAvailable() {
+		if backend != "worker" {
+			t.Fatalf("expected built-in rules to select worker when available, got %q", backend)
+		}
+		return
+	}
+
+	if backend != "" {
+		t.Fatalf("expected no built-in worker override when worker backend is unavailable, got %q", backend)
 	}
 }

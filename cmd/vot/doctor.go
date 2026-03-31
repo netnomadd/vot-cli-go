@@ -8,6 +8,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/netnomadd/vot-cli-go/internal/config"
+	"github.com/netnomadd/vot-cli-go/internal/yandexclient"
 )
 
 // doctorMain handles `vot doctor` / `vot check` subcommand.
@@ -28,11 +29,12 @@ func doctorMain(parent *flag.FlagSet, args []string) {
 	}
 
 	// Load configuration.
-	_, cfgPath, err := config.Load(flagConfig)
+	cfg, cfgPath, err := config.Load(flagConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: "+msg.FailedLoadConfigFmt+"\n", msg.ErrorPrefix, err)
 		os.Exit(1)
 	}
+	applyConfigEnvOverrides(cfg)
 
 	fmt.Fprintln(os.Stderr, msg.DoctorChecksHeader)
 
@@ -64,7 +66,22 @@ func doctorMain(parent *flag.FlagSet, args []string) {
 	printEnvStatus("VOT_USER_AGENT")
 	printEnvStatus("VOT_YANDEX_HMAC_KEY")
 	printEnvStatus("VOT_YANDEX_TOKEN")
+	printEnvStatus("VOT_WORKER_URL")
 	printEnvStatus("VOT_LANG")
+
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, msg.DoctorWorkerHeader)
+	if yandexclient.WorkerBackendAvailable() {
+		fmt.Fprintln(os.Stderr, msg.DoctorWorkerBuiltIn)
+	} else {
+		fmt.Fprintln(os.Stderr, msg.DoctorWorkerDisabled)
+	}
+	workerURL := configuredWorkerURL(cfg)
+	if _, _, err := yandexclient.NormalizeWorkerURL(workerURL); err != nil {
+		fmt.Fprintf(os.Stderr, msg.DoctorWorkerURLInvalidFmt+"\n", workerURL, err)
+	} else {
+		fmt.Fprintf(os.Stderr, "%s %s\n", msg.DoctorWorkerURLLabel, workerURL)
+	}
 
 	// yt-dlp availability.
 	fmt.Fprintln(os.Stderr, "")

@@ -1,3 +1,5 @@
+//go:build !no_worker
+
 package yandexclient
 
 import (
@@ -41,11 +43,6 @@ type WorkerClient struct {
 	sessions map[string]*clientSession
 }
 
-const (
-	defaultWorkerSchema = "https"
-	defaultWorkerHost   = "vot-worker.toil.cc"
-)
-
 // NewWorkerClient creates a WorkerClient with sane defaults.
 func NewWorkerClient() *WorkerClient {
 	return &WorkerClient{
@@ -57,6 +54,21 @@ func NewWorkerClient() *WorkerClient {
 		componentVersion: defaultComponentVersion,
 		sessions:         make(map[string]*clientSession),
 	}
+}
+
+func WorkerBackendAvailable() bool {
+	return true
+}
+
+// SetWorkerURL overrides the default worker endpoint if non-empty.
+func (c *WorkerClient) SetWorkerURL(raw string) error {
+	schema, host, err := NormalizeWorkerURL(raw)
+	if err != nil {
+		return err
+	}
+	c.schema = schema
+	c.host = host
+	return nil
 }
 
 // SetUserAgent overrides the default User-Agent if non-empty.

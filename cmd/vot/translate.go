@@ -54,6 +54,7 @@ type messages struct {
 	PollIntervalTooSmall            string
 	PollAttemptsInvalid             string
 	FailedLoadConfigFmt             string
+	InvalidWorkerURLFmt             string
 	UnknownBackendFmt               string
 	UnknownCommandFmt               string
 	TimeoutErrorFmt                 string
@@ -75,6 +76,11 @@ type messages struct {
 	DoctorEnvHeader           string
 	DoctorFieldSet            string
 	DoctorFieldMissing        string
+	DoctorWorkerHeader        string
+	DoctorWorkerBuiltIn       string
+	DoctorWorkerDisabled      string
+	DoctorWorkerURLLabel      string
+	DoctorWorkerURLInvalidFmt string
 	DoctorYtDLPHeader         string
 	DoctorYtDLPFound          string
 	DoctorYtDLPNotFoundFmt    string
@@ -139,6 +145,7 @@ func getMessages() messages {
 			PollIntervalTooSmall:            "--poll-interval должен быть не менее 30 секунд",
 			PollAttemptsInvalid:             "--poll-attempts должен быть положительным числом",
 			FailedLoadConfigFmt:             "не удалось загрузить конфиг: %v",
+			InvalidWorkerURLFmt:             "некорректный worker URL %q: %v",
 			UnknownBackendFmt:               "неизвестный backend '%s' (ожидается 'direct' или 'worker')",
 			UnknownCommandFmt:               "неизвестная команда: %s",
 			TimeoutErrorFmt:                 "перевод не завершился за %d секунд; попробуйте увеличить --poll-attempts или --poll-interval",
@@ -159,6 +166,11 @@ func getMessages() messages {
 			DoctorEnvHeader:           "переменные окружения:",
 			DoctorFieldSet:            "задано",
 			DoctorFieldMissing:        "не задано",
+			DoctorWorkerHeader:        "worker backend:",
+			DoctorWorkerBuiltIn:       "  поддержка worker: включена в эту сборку",
+			DoctorWorkerDisabled:      "  поддержка worker: отключена в этой сборке",
+			DoctorWorkerURLLabel:      "  endpoint:",
+			DoctorWorkerURLInvalidFmt: "  endpoint: некорректный URL %q: %v",
 			DoctorYtDLPHeader:         "yt-dlp:",
 			DoctorYtDLPFound:          "  бинарник: найден в PATH",
 			DoctorYtDLPNotFoundFmt:    "  бинарник: не найден в PATH: %v",
@@ -197,6 +209,7 @@ func getMessages() messages {
 			PollIntervalTooSmall:            "--poll-interval must be at least 30 seconds",
 			PollAttemptsInvalid:             "--poll-attempts must be positive",
 			FailedLoadConfigFmt:             "failed to load config: %v",
+			InvalidWorkerURLFmt:             "invalid worker URL %q: %v",
 			UnknownBackendFmt:               "unknown backend '%s' (expected 'direct' or 'worker')",
 			UnknownCommandFmt:               "unknown command: %s",
 			TimeoutErrorFmt:                 "translation timed out after %d seconds; try increasing --poll-attempts or --poll-interval",
@@ -217,6 +230,11 @@ func getMessages() messages {
 			DoctorEnvHeader:           "environment overrides:",
 			DoctorFieldSet:            "set",
 			DoctorFieldMissing:        "not set",
+			DoctorWorkerHeader:        "worker backend:",
+			DoctorWorkerBuiltIn:       "  worker support: compiled into this build",
+			DoctorWorkerDisabled:      "  worker support: disabled in this build",
+			DoctorWorkerURLLabel:      "  endpoint:",
+			DoctorWorkerURLInvalidFmt: "  endpoint: invalid URL %q: %v",
 			DoctorYtDLPHeader:         "yt-dlp:",
 			DoctorYtDLPFound:          "  binary: found in PATH",
 			DoctorYtDLPNotFoundFmt:    "  binary: not found in PATH: %v",
@@ -308,15 +326,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	}
 
 	// Environment variables override config file values when set.
-	if ua := os.Getenv("VOT_USER_AGENT"); ua != "" {
-		cfg.UserAgent = ua
-	}
-	if h := os.Getenv("VOT_YANDEX_HMAC_KEY"); h != "" {
-		cfg.YandexHMACKey = h
-	}
-	if t := os.Getenv("VOT_YANDEX_TOKEN"); t != "" {
-		cfg.YandexToken = t
-	}
+	applyConfigEnvOverrides(cfg)
 	if flagDebug && !flagSilent {
 		if os.Getenv("VOT_USER_AGENT") != "" {
 			fmt.Fprintln(os.Stderr, "[debug] using User-Agent from VOT_USER_AGENT")
@@ -326,6 +336,9 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		}
 		if os.Getenv("VOT_YANDEX_TOKEN") != "" {
 			fmt.Fprintln(os.Stderr, "[debug] using API token from VOT_YANDEX_TOKEN")
+		}
+		if os.Getenv("VOT_WORKER_URL") != "" {
+			fmt.Fprintln(os.Stderr, "[debug] using worker URL from VOT_WORKER_URL")
 		}
 	}
 
@@ -417,6 +430,10 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		workerClient.SetUserAgent(cfg.UserAgent)
 		workerClient.SetHMACKey(cfg.YandexHMACKey)
 		workerClient.SetAPIToken(cfg.YandexToken)
+		if err := workerClient.SetWorkerURL(cfg.WorkerURL); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidWorkerURLFmt+"\n", msg.ErrorPrefix, cfg.WorkerURL, err)
+			os.Exit(1)
+		}
 	}
 
 	exitCode := 0
@@ -791,6 +808,11 @@ func stringPtr(v string) *string {
 }
 
 func builtInSourceRuleConfigs() []config.SourceRuleConfig {
+	var workerBackend *string
+	if yandexclient.WorkerBackendAvailable() {
+		workerBackend = stringPtr("worker")
+	}
+
 	return []config.SourceRuleConfig{
 		{
 			Patterns: []string{
@@ -799,21 +821,21 @@ func builtInSourceRuleConfigs() []config.SourceRuleConfig {
 			},
 			UseYtDLP:          boolPtr(true),
 			YtDLPUseDirectURL: boolPtr(false),
-			Backend:           stringPtr("worker"),
+			Backend:           workerBackend,
 			VoiceStyle:        stringPtr("live"),
 		},
 		{
 			Pattern:           `(?i)^https?://[^/]*(invidio\.us|invidious|piped)[^/]*/`,
 			UseYtDLP:          boolPtr(true),
 			YtDLPUseDirectURL: boolPtr(false),
-			Backend:           stringPtr("worker"),
+			Backend:           workerBackend,
 		},
 		{
 			Pattern:           `(?i)^https?://www\.zdf\.de/play/`,
 			UseYtDLP:          boolPtr(true),
 			YtDLPUseDirectURL: boolPtr(true),
 			RequestLang:       stringPtr("de"),
-			Backend:           stringPtr("worker"),
+			Backend:           workerBackend,
 			VoiceStyle:        stringPtr("tts"),
 		},
 	}

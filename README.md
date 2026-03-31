@@ -8,7 +8,7 @@
 Кроссплатформенная CLI-утилита на Go для перевода озвучки видео через сервисы Яндекса / FOSWLY. Поддерживаются два backend’а:
 
 - **direct** — прямые запросы к `api.browser.yandex.ru` (динамический protobuf, HMAC-подпись заголовков);
-- **worker** — запросы к worker-сервису (по умолчанию `https://vot-worker.toil.cc`), который проксирует обращение к Яндексу.
+- **worker** — запросы к worker-сервису (по умолчанию `https://vot-worker.toil.cc`, адрес можно переопределить в конфиге или через окружение), который проксирует обращение к Яндексу.
 
 ## Установка и сборка
 
@@ -29,6 +29,9 @@
 ```bash
 # из корня репозитория
 go build -o vot ./cmd/vot
+
+# вариант без поддержки worker backend
+go build -tags no_worker -o vot ./cmd/vot
 ```
 
 Для кроссплатформенной сборки достаточно задать `GOOS`/`GOARCH`, например:
@@ -106,6 +109,7 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
   "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... YaBrowser/25.4.0.0 Safari/537.36",
   "yandex_hmac_key": "bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf",
   "yandex_token": "ya-oauth-token-for-lively-voice-if-needed",
+  "worker_url": "https://vot-worker.toil.cc",
   "default_response_lang": "ru",
   "use_yt_dlp": true,
   "yt_dlp_use_direct_url": true,
@@ -136,6 +140,7 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
 - `user_agent` — User-Agent, который будет использован в запросах к Яндексу/worker’у;
 - `yandex_hmac_key` — ключ для HMAC-подписи `Sec-*` заголовков (по умолчанию прошит в бинарник);
 - `yandex_token` — OAuth-токен Яндекса, используемый для живых голосов (Lively Voice), если задан;
+- `worker_url` — базовый URL worker backend’а (только схема + host, без path/query/fragment), если нужно использовать не `https://vot-worker.toil.cc`, а другой адрес;
 - `default_response_lang` — язык перевода по умолчанию, если флаг `--response-lang` не указан (по умолчанию `ru` в бинарнике; это поле позволяет сменить его, не меняя CLI-аргументы);
 - `use_yt_dlp` — при `true` CLI может использовать локально установленный `yt-dlp` (если он найден в `PATH`) для получения прямых медиассылок/метаданных;
 - `yt_dlp_use_direct_url` — при `true` backends получают уже «распакованный» прямой URL от `yt-dlp`, при `false` — исходный URL (напр. страница YouTube);
@@ -156,7 +161,8 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
 
 - `VOT_USER_AGENT` → `user_agent`;
 - `VOT_YANDEX_HMAC_KEY` → `yandex_hmac_key`;
-- `VOT_YANDEX_TOKEN` → `yandex_token`.
+- `VOT_YANDEX_TOKEN` → `yandex_token`;
+- `VOT_WORKER_URL` → `worker_url`.
 
 Пример:
 
@@ -216,6 +222,7 @@ vot translate --response-lang=ru "https://youtu.be/..."
 Для локальной разработки доступны цели `Makefile`:
 
 - `make build` — собрать бинарник `vot` из `./cmd/vot`;
+- `make build-no-worker` — собрать `vot` без поддержки worker backend (`go build -tags no_worker ...`);
 - `make test` — запустить `go test ./...`;
 - `make fmt` — прогнать `gofmt` по исходникам в `cmd/` и `internal/`;
 - `make vet` — запустить `go vet ./...` для базовой статической проверки кода;
@@ -242,6 +249,41 @@ vot --silent translate --response-lang=ru "https://youtu.be/..."  # только
 ```bash
 VOT_LANG=ru vot --backend=worker --config ~/.config/vot-cli/config.json translate --response-lang=ru "https://youtu.be/..."
 ```
+
+### Смена адреса worker backend
+
+Если публичный worker переехал на другой домен или вы подняли свой экземпляр, достаточно переопределить базовый URL:
+
+```json
+{
+  "worker_url": "https://worker.example.com"
+}
+```
+
+или:
+
+```bash
+export VOT_WORKER_URL="https://worker.example.com"
+vot --backend=worker translate --response-lang=ru "https://youtu.be/..."
+```
+
+CLI ожидает здесь только схему и host; пути вида `https://worker.example.com/api` не поддерживаются, потому что нужные endpoint’ы он добавляет сам.
+
+### Сборка без поддержки worker
+
+Если нужна сборка, не зависящая от внешнего worker backend, можно отключить этот код на этапе компиляции:
+
+```bash
+go build -tags no_worker -o vot ./cmd/vot
+```
+
+или:
+
+```bash
+make build-no-worker
+```
+
+В такой сборке backend `worker` недоступен: явный `--backend=worker` и пользовательские `source_rules` с `backend=worker` будут завершаться понятной ошибкой. Встроенные `source_rules` при этом больше не переключают YouTube / Invidious / ZDF на worker автоматически.
 
 ## Примеры конфигов
 
@@ -377,4 +419,3 @@ vot translate --direct-url -t ru "https://cdn.example.com/video.mp4"
 - Проверьте `default_response_lang` в конфиге и значение флага `--response-lang`.
 - Убедитесь, что для URL не срабатывает правило из `source_rules`, которое меняет `request_lang` или `voice_style`.
 - При отладке всегда полезно включать `--debug` — финальные параметры запроса (языки, backend, стиль голоса, использование `yt-dlp`) выводятся перед отправкой запроса.
-

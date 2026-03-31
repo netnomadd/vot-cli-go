@@ -17,20 +17,21 @@ import (
 // All fields are optional except Pattern/Patterns; boolean and string fields
 // are pointers so that "unset" differs from an explicit value.
 // Example JSON entry:
-// {
-//   "patterns": [
-//     "(?i)^https?://www\\.zdf\\.de/play/",
-//     "(?i)^https?://zdf\\.example/alternate/"
-//   ],
-//   "use_yt_dlp": true,
-//   "yt_dlp_use_direct_url": true,
-//   "request_lang": "de",
-//   "backend": "worker",
-//   "voice_style": "tts",
-//   "rewrite": [
-//     { "pattern": "(?i)^https?://zdf\\.example/(.*)", "replace": "https://www.zdf.de/play/$1" }
-//   ]
-// }
+//
+//	{
+//	  "patterns": [
+//	    "(?i)^https?://www\\.zdf\\.de/play/",
+//	    "(?i)^https?://zdf\\.example/alternate/"
+//	  ],
+//	  "use_yt_dlp": true,
+//	  "yt_dlp_use_direct_url": true,
+//	  "request_lang": "de",
+//	  "backend": "worker",
+//	  "voice_style": "tts",
+//	  "rewrite": [
+//	    { "pattern": "(?i)^https?://zdf\\.example/(.*)", "replace": "https://www.zdf.de/play/$1" }
+//	  ]
+//	}
 //
 // Rules from config are applied after built-in defaults, so they can override
 // behaviour for matching sites.
@@ -69,6 +70,7 @@ type Config struct {
 	UserAgent     string `json:"user_agent"`
 	YandexHMACKey string `json:"yandex_hmac_key"`
 	YandexToken   string `json:"yandex_token"`
+	WorkerURL     string `json:"worker_url"`
 
 	// Optional default target language for translations when --response-lang
 	// не указан явно. Если пусто, по умолчанию используется "ru".
@@ -76,9 +78,9 @@ type Config struct {
 
 	// Optional integration with yt-dlp (if installed in the system).
 	// These flags only take effect in features that explicitly support yt-dlp.
-	UseYtDLP              bool   `json:"use_yt_dlp"`
-	YtDLPUseDirectURL     bool   `json:"yt_dlp_use_direct_url"`
-	YtDLPCookies          string `json:"yt_dlp_cookies"`
+	UseYtDLP                bool   `json:"use_yt_dlp"`
+	YtDLPUseDirectURL       bool   `json:"yt_dlp_use_direct_url"`
+	YtDLPCookies            string `json:"yt_dlp_cookies"`
 	YtDLPCookiesFromBrowser string `json:"yt_dlp_cookies_from_browser"`
 
 	// Optional per-source rules that can tweak yt-dlp usage and direct URL

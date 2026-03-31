@@ -1,7 +1,10 @@
-.PHONY: build test fmt vet lint generate-proto ci
+.PHONY: build build-no-worker test fmt vet lint generate-proto ci
 
 build:
 	go build -o vot ./cmd/vot
+
+build-no-worker:
+	go build -tags no_worker -o vot ./cmd/vot
 
 test:
 	go test ./...
