@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -437,13 +438,14 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		effectiveReqLang, effectiveBackend = applySourceLangAndBackend(u, sourceRules, effectiveReqLang, effectiveBackend, reqLangFlagChanged, backendFlagChanged)
 		effectiveVoiceStyle = applySourceVoiceStyle(u, sourceRules, effectiveVoiceStyle, voiceStyleFlagChanged)
 		cookies, cookiesFromBrowser := applySourceYtDLPCookies(u, sourceRules, ytDLPCookies, ytDLPCookiesFromBrowser, ytDLPCookiesFlagChanged, ytDLPCookiesFromBrowserFlagChanged)
+		effectiveURL = applySourceURLRewrites(effectiveURL, sourceRules)
 
 		// Optionally use yt-dlp to resolve a direct media URL and obtain duration.
 		if useYtDLPForURL {
-			if d, err := getVideoDurationWithYtDLP(u, cookies, cookiesFromBrowser); err != nil {
+			if d, err := getVideoDurationWithYtDLP(effectiveURL, cookies, cookiesFromBrowser); err != nil {
 				if !flagSilent {
 					if flagDebug {
-						fmt.Fprintf(os.Stderr, "[debug] yt-dlp failed to get duration for %s: %v\n", u, err)
+						fmt.Fprintf(os.Stderr, "[debug] yt-dlp failed to get duration for %s: %v\n", effectiveURL, err)
 					}
 					fmt.Fprintf(os.Stderr, "%s: "+msg.YtDLPFailureFmt+"\n", msg.ErrorPrefix, u)
 					fmt.Fprintln(os.Stderr, msg.YtDLPAuthHint)
@@ -451,21 +453,21 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			} else {
 				durationSec = d
 				if flagDebug && !flagSilent {
-					fmt.Fprintf(os.Stderr, "[debug] yt-dlp duration for %s: %.1fs\n", u, d)
+					fmt.Fprintf(os.Stderr, "[debug] yt-dlp duration for %s: %.1fs\n", effectiveURL, d)
 				}
 			}
 
-			if directURL, err := resolveDirectURLWithYtDLP(u, cookies, cookiesFromBrowser); err != nil {
+			if directURL, err := resolveDirectURLWithYtDLP(effectiveURL, cookies, cookiesFromBrowser); err != nil {
 				if !flagSilent {
 					if flagDebug {
-						fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolution failed for %s: %v\n", u, err)
+						fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolution failed for %s: %v\n", effectiveURL, err)
 					}
 					fmt.Fprintf(os.Stderr, "%s: "+msg.YtDLPFailureFmt+"\n", msg.ErrorPrefix, u)
 					fmt.Fprintln(os.Stderr, msg.YtDLPAuthHint)
 				}
 			} else {
 				if flagDebug && !flagSilent {
-					fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolved %s -> %s\n", u, directURL)
+					fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolved %s -> %s\n", effectiveURL, directURL)
 				}
 				if ytDLPUseDirectURLForURL {
 					effectiveURL = directURL
@@ -739,4 +741,259 @@ func isDirectMediaPath(p string) bool {
 	default:
 		return false
 	}
+}
+
+type sourceRewriteRule struct {
+	re      *regexp.Regexp
+	replace string
+}
+
+// sourceRule is an internal compiled representation of a per-source rule
+// from config. All fields are optional except at least one regexp pattern.
+type sourceRule struct {
+	patterns                []*regexp.Regexp
+	patternTexts            []string
+	useYtDLP                *bool
+	ytDLPUseDirectURL       *bool
+	ytDLPCookies            *string
+	ytDLPCookiesFromBrowser *string
+	requestLang             *string
+	backend                 *string
+	voiceStyle              *string
+	rewrite                 []sourceRewriteRule
+}
+
+func (r sourceRule) matches(rawURL string) bool {
+	for _, re := range r.patterns {
+		if re.MatchString(rawURL) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r sourceRule) summary() string {
+	if len(r.patternTexts) == 0 {
+		return "<unknown>"
+	}
+	if len(r.patternTexts) == 1 {
+		return r.patternTexts[0]
+	}
+	return strings.Join(r.patternTexts, ",")
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func stringPtr(v string) *string {
+	return &v
+}
+
+func builtInSourceRuleConfigs() []config.SourceRuleConfig {
+	return []config.SourceRuleConfig{
+		{
+			Patterns: []string{
+				`(?i)^https?://(www\.)?youtube\.com/watch`,
+				`(?i)^https?://(www\.)?youtu\.be/`,
+			},
+			UseYtDLP:          boolPtr(true),
+			YtDLPUseDirectURL: boolPtr(false),
+			Backend:           stringPtr("worker"),
+			VoiceStyle:        stringPtr("live"),
+		},
+		{
+			Pattern:           `(?i)^https?://[^/]*(invidio\.us|invidious|piped)[^/]*/`,
+			UseYtDLP:          boolPtr(true),
+			YtDLPUseDirectURL: boolPtr(false),
+			Backend:           stringPtr("worker"),
+		},
+		{
+			Pattern:           `(?i)^https?://www\.zdf\.de/play/`,
+			UseYtDLP:          boolPtr(true),
+			YtDLPUseDirectURL: boolPtr(true),
+			RequestLang:       stringPtr("de"),
+			Backend:           stringPtr("worker"),
+			VoiceStyle:        stringPtr("tts"),
+		},
+	}
+}
+
+func compileSourceRules(cfgRules []config.SourceRuleConfig) []sourceRule {
+	var rules []sourceRule
+
+	for _, cfgRule := range cfgRules {
+		var rawPatterns []string
+		if cfgRule.Pattern != "" {
+			rawPatterns = append(rawPatterns, cfgRule.Pattern)
+		}
+		rawPatterns = append(rawPatterns, cfgRule.Patterns...)
+
+		var compiledPatterns []*regexp.Regexp
+		var patternTexts []string
+		for _, rawPattern := range rawPatterns {
+			if rawPattern == "" {
+				continue
+			}
+			re, err := regexp.Compile(rawPattern)
+			if err != nil {
+				continue
+			}
+			compiledPatterns = append(compiledPatterns, re)
+			patternTexts = append(patternTexts, rawPattern)
+		}
+		if len(compiledPatterns) == 0 {
+			continue
+		}
+
+		var rewrites []sourceRewriteRule
+		for _, rewrite := range cfgRule.Rewrite {
+			if rewrite.Pattern == "" {
+				continue
+			}
+			re, err := regexp.Compile(rewrite.Pattern)
+			if err != nil {
+				continue
+			}
+			rewrites = append(rewrites, sourceRewriteRule{
+				re:      re,
+				replace: rewrite.Replace,
+			})
+		}
+
+		rules = append(rules, sourceRule{
+			patterns:                compiledPatterns,
+			patternTexts:            patternTexts,
+			useYtDLP:                cfgRule.UseYtDLP,
+			ytDLPUseDirectURL:       cfgRule.YtDLPUseDirectURL,
+			ytDLPCookies:            cfgRule.YtDLPCookies,
+			ytDLPCookiesFromBrowser: cfgRule.YtDLPCookiesFromBrowser,
+			requestLang:             cfgRule.RequestLang,
+			backend:                 cfgRule.Backend,
+			voiceStyle:              cfgRule.VoiceStyle,
+			rewrite:                 rewrites,
+		})
+	}
+
+	return rules
+}
+
+// buildSourceRulesFromConfig compiles source rules from built-ins and config.
+// Invalid regexp entries are ignored so a broken rule does not break the CLI.
+func buildSourceRulesFromConfig(cfg *config.Config) []sourceRule {
+	rules := compileSourceRules(builtInSourceRuleConfigs())
+	if cfg == nil {
+		return rules
+	}
+	return append(rules, compileSourceRules(cfg.SourceRules)...)
+}
+
+// applySourceRules adjusts yt-dlp usage flags for a specific URL based on
+// matching source rules. CLI flags take precedence over rules when changed.
+func applySourceRules(rawURL string, rules []sourceRule, baseUseYtDLP, baseYtDLPUseDirectURL bool, useFlagChanged, directFlagChanged bool) (bool, bool) {
+	use := baseUseYtDLP
+	direct := baseYtDLPUseDirectURL
+
+	for _, r := range rules {
+		if !r.matches(rawURL) {
+			continue
+		}
+		if !useFlagChanged && r.useYtDLP != nil {
+			use = *r.useYtDLP
+		}
+		if !directFlagChanged && r.ytDLPUseDirectURL != nil {
+			direct = *r.ytDLPUseDirectURL
+		}
+	}
+
+	return use, direct
+}
+
+// applySourceLangAndBackend adjusts request language and backend based on
+// matching source rules. CLI flags again take precedence when explicitly set.
+func applySourceLangAndBackend(rawURL string, rules []sourceRule, baseReqLang, baseBackend string, reqLangFlagChanged, backendFlagChanged bool) (string, string) {
+	reqLang := baseReqLang
+	backend := baseBackend
+
+	for _, r := range rules {
+		if !r.matches(rawURL) {
+			continue
+		}
+		if !reqLangFlagChanged && r.requestLang != nil {
+			reqLang = *r.requestLang
+		}
+		if !backendFlagChanged && r.backend != nil {
+			backend = *r.backend
+		}
+	}
+
+	return reqLang, backend
+}
+
+// applySourceVoiceStyle adjusts voice style based on matching rules unless
+// the user explicitly set --voice-style.
+func applySourceVoiceStyle(rawURL string, rules []sourceRule, baseVoiceStyle string, voiceStyleFlagChanged bool) string {
+	voiceStyle := baseVoiceStyle
+
+	for _, r := range rules {
+		if !r.matches(rawURL) {
+			continue
+		}
+		if !voiceStyleFlagChanged && r.voiceStyle != nil {
+			voiceStyle = *r.voiceStyle
+		}
+	}
+
+	return voiceStyle
+}
+
+// applySourceYtDLPCookies adjusts yt-dlp cookies settings from matching rules
+// unless the corresponding CLI flags were explicitly set.
+func applySourceYtDLPCookies(rawURL string, rules []sourceRule, baseCookies, baseCookiesFromBrowser string, cookiesFlagChanged, cookiesFromBrowserFlagChanged bool) (string, string) {
+	cookies := baseCookies
+	cookiesFromBrowser := baseCookiesFromBrowser
+
+	for _, r := range rules {
+		if !r.matches(rawURL) {
+			continue
+		}
+		if !cookiesFlagChanged && r.ytDLPCookies != nil {
+			cookies = *r.ytDLPCookies
+		}
+		if !cookiesFromBrowserFlagChanged && r.ytDLPCookiesFromBrowser != nil {
+			cookiesFromBrowser = *r.ytDLPCookiesFromBrowser
+		}
+	}
+
+	return cookies, cookiesFromBrowser
+}
+
+// applySourceURLRewrites applies rewrite rules from matching source rules in
+// order. Each matched rule can rewrite the URL before it is sent to yt-dlp or
+// directly to the backend.
+func applySourceURLRewrites(rawURL string, rules []sourceRule) string {
+	rewritten := rawURL
+
+	for _, r := range rules {
+		if !r.matches(rewritten) {
+			continue
+		}
+		for _, rewrite := range r.rewrite {
+			rewritten = rewrite.re.ReplaceAllString(rewritten, rewrite.replace)
+		}
+	}
+
+	return rewritten
+}
+
+// matchedSourceRuleSummaries returns a stable debug/explain summary of rules
+// that matched the original URL.
+func matchedSourceRuleSummaries(rawURL string, rules []sourceRule) []string {
+	var summaries []string
+	for _, r := range rules {
+		if r.matches(rawURL) {
+			summaries = append(summaries, r.summary())
+		}
+	}
+	return summaries
 }
