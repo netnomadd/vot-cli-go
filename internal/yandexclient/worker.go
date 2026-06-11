@@ -147,8 +147,10 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 
 		status := resp.GetStatus()
 		remaining := resp.GetRemainingTime()
+		translationID := resp.GetTranslationId()
+		shouldRetry := resp.GetShouldRetry()
 		if p.Debug {
-			fmt.Fprintf(os.Stderr, "[debug] [worker] poll attempt %d/%d first_request=%v status=%d remaining=%d\n", attempt+1, attempts, firstRequest, status, remaining)
+			fmt.Fprintf(os.Stderr, "[debug] [worker] poll attempt %d/%d first_request=%v status=%d remaining=%d translation_id=%s should_retry=%d\n", attempt+1, attempts, firstRequest, status, remaining, translationID, shouldRetry)
 		}
 
 		url := resp.GetUrl()
@@ -168,7 +170,6 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		case 2, 3, 6: // WAITING / LONG_WAITING / AUDIO_REQUESTED
 			audioFixURL, canApplyAudioFix := youtubeAudioWorkaroundURL(p.URL)
 			if status == 6 && !triedAudioRequestedFix && canApplyAudioFix {
-				translationID := resp.GetTranslationId()
 				if translationID == "" {
 					msg = "yandex: AUDIO_REQUESTED returned empty translationId via worker"
 					break
