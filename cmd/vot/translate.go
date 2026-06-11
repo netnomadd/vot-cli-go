@@ -51,6 +51,8 @@ type messages struct {
 	FlagYtDLPCookiesHelp            string
 	FlagYtDLPCookiesFromBrowserHelp string
 	FlagExplainHelp                 string
+	FlagAllowLongVideoHelp          string
+	FlagAudioRequestedRealUploadHelp string
 	RespLangRequired                string
 	InvalidVoiceStyle               string
 	PollIntervalTooSmall            string
@@ -67,6 +69,7 @@ type messages struct {
 	YtDLPFailureFmt                 string
 	SessionRequiredHelp             string
 	UnsupportedDirectURLHelp        string
+	VideoTooLongFmt                 string
 
 	// Doctor command
 	UsageDoctor               string
@@ -88,6 +91,8 @@ type messages struct {
 	DoctorYtDLPNotFoundFmt    string
 	DoctorSummaryOK           string
 }
+
+const maxVideoDurationSec = 4 * 60 * 60
 
 // getMessages returns localized messages based on --lang flag, VOT_LANG or CLI args.
 func getMessages() messages {
@@ -143,6 +148,8 @@ func getMessages() messages {
 			FlagYtDLPCookiesHelp:            "путь к файлу cookies, передаваемому в yt-dlp (--cookies)",
 			FlagYtDLPCookiesFromBrowserHelp: "браузер для передачи cookies в yt-dlp (--cookies-from-browser)",
 			FlagExplainHelp:                 "показать, как будет обработан каждый URL, и выйти, не обращаясь к backend'ам",
+			FlagAllowLongVideoHelp:          "разрешить видео длиннее 4 часов (отключить локальную pre-check проверку лимита длительности)",
+			FlagAudioRequestedRealUploadHelp: "при AUDIO_REQUESTED пытаться загрузить реальное аудио (иначе поведение как в vot.js: только fake/empty audio)",
 			RespLangRequired:                "--response-lang обязателен",
 			InvalidVoiceStyle:               "--voice-style может быть только 'live' или 'tts'",
 			PollIntervalTooSmall:            "--poll-interval должен быть 0 (auto) или не менее 30 секунд",
@@ -159,6 +166,7 @@ func getMessages() messages {
 			YtDLPFailureFmt:                 "yt-dlp не смог обработать этот URL %s; продолжаю без yt-dlp.",
 			SessionRequiredHelp:             "Подсказка: SESSION_REQUIRED обычно означает, что видео доступно только авторизованным пользователям Яндекс-Браузера; CLI не может обойти это ограничение.",
 			UnsupportedDirectURLHelp:        "Подсказка: backend не принимает этот прямой URL; попробуйте передать исходный URL страницы или отключить режим прямых ссылок / yt-dlp direct.",
+			VideoTooLongFmt:                 "видео слишком длинное: %.0f секунд (лимит %d секунд / 4 часа)",
 
 			UsageDoctor:               "использование: vot doctor [глобальные опции]",
 			DoctorChecksHeader:        "проверки:",
@@ -208,6 +216,8 @@ func getMessages() messages {
 			FlagYtDLPCookiesHelp:            "path to cookies file to pass to yt-dlp (--cookies)",
 			FlagYtDLPCookiesFromBrowserHelp: "browser spec to pass to yt-dlp (--cookies-from-browser)",
 			FlagExplainHelp:                 "print how each URL will be handled and exit without contacting backends",
+			FlagAllowLongVideoHelp:          "allow videos longer than 4 hours (disable local pre-check duration limit)",
+			FlagAudioRequestedRealUploadHelp: "for AUDIO_REQUESTED, try real-audio upload (otherwise vot.js-like behaviour: fake/empty audio only)",
 			RespLangRequired:                "--response-lang is required",
 			InvalidVoiceStyle:               "--voice-style must be 'live' or 'tts'",
 			PollIntervalTooSmall:            "--poll-interval must be 0 (auto) or at least 30 seconds",
@@ -224,6 +234,7 @@ func getMessages() messages {
 			YtDLPFailureFmt:                 "yt-dlp failed for this URL %s; continuing without yt-dlp.",
 			SessionRequiredHelp:             "hint: SESSION_REQUIRED usually means the video is limited to logged-in Yandex Browser users; the CLI cannot bypass this restriction.",
 			UnsupportedDirectURLHelp:        "hint: the backend does not accept this direct URL; try passing the original page URL or disabling direct-url / yt-dlp direct mode.",
+			VideoTooLongFmt:                 "video is too long: %.0f seconds (limit %d seconds / 4 hours)",
 
 			UsageDoctor:               "usage: vot doctor [global options]",
 			DoctorChecksHeader:        "checks:",
@@ -279,6 +290,8 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		flagYtDLPCookies            string
 		flagYtDLPCookiesFromBrowser string
 		flagExplain                 bool
+		flagAllowLongVideo          bool
+		flagAudioRequestedRealUpload bool
 	)
 	pollIntervalFlagChanged := false
 
@@ -295,6 +308,8 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	fs.StringVar(&flagYtDLPCookies, "yt-dlp-cookies", "", msg.FlagYtDLPCookiesHelp)
 	fs.StringVar(&flagYtDLPCookiesFromBrowser, "yt-dlp-cookies-from-browser", "", msg.FlagYtDLPCookiesFromBrowserHelp)
 	fs.BoolVar(&flagExplain, "explain", false, msg.FlagExplainHelp)
+	fs.BoolVar(&flagAllowLongVideo, "allow-long-video", false, msg.FlagAllowLongVideoHelp)
+	fs.BoolVar(&flagAudioRequestedRealUpload, "audio-requested-real-upload", false, msg.FlagAudioRequestedRealUploadHelp)
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -514,6 +529,13 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 		sourceKind := classifySource(effectiveURL)
 
+		if durationSec > maxVideoDurationSec && !flagAllowLongVideo {
+			fmt.Fprintf(os.Stderr, "%s: %s: "+msg.VideoTooLongFmt+"\n", msg.ErrorPrefix, u, durationSec, maxVideoDurationSec)
+			cancel()
+			exitCode = 1
+			continue
+		}
+
 		directForBackend := effectiveDirect
 		if sourceKind == "direct_media" {
 			directForBackend = true
@@ -590,6 +612,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			UseYtDLP:                useYtDLPForURL,
 			YtDLPCookies:            cookies,
 			YtDLPCookiesFromBrowser: cookiesFromBrowser,
+			AudioRequestedRealUpload: flagAudioRequestedRealUpload,
 			PollIntervalSec:   flagPollInterval,
 			FixedPollInterval: fixedPollInterval,
 			PollAttempts:      flagPollAttempts,

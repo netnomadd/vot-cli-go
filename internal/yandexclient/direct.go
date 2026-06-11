@@ -266,7 +266,7 @@ func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 }
 
 func resolveAudioDataForUpload(ctx context.Context, p backend.TranslateParams, _ string) (*audioUploadPayload, bool) {
-	if !p.UseYtDLP {
+	if !p.AudioRequestedRealUpload || !p.UseYtDLP {
 		return nil, false
 	}
 	audioFixURL, ok := youtubeAudioWorkaroundURL(p.URL)

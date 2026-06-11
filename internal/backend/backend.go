@@ -35,6 +35,9 @@ type TranslateParams struct {
 	UseYtDLP                bool
 	YtDLPCookies            string
 	YtDLPCookiesFromBrowser string
+	// If true, AUDIO_REQUESTED handler attempts real-audio upload first.
+	// If false, it follows vot.js-like behaviour (fake/empty audio payload only).
+	AudioRequestedRealUpload bool
 
 	// Polling configuration (seconds between attempts, number of attempts).
 	// PollAttempts==0 means unlimited attempts until context timeout/cancel.
