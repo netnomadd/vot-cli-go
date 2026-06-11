@@ -2,6 +2,7 @@ package yandexclient
 
 import (
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -114,5 +115,32 @@ func TestRandomUUID32(t *testing.T) {
 		if !isDigit && !isHexUpper {
 			t.Fatalf("uuid contains non-hex character %q at %d", ch, i)
 		}
+	}
+}
+
+func TestNextPollDelay(t *testing.T) {
+	base := 30 * time.Second
+
+	tests := []struct {
+		name      string
+		remaining int32
+		want      time.Duration
+	}{
+		{name: "no remaining uses base", remaining: 0, want: 30 * time.Second},
+		{name: "negative remaining uses base", remaining: -1, want: 30 * time.Second},
+		{name: "short remaining clamps to min", remaining: 1, want: 5 * time.Second},
+		{name: "remaining under base uses remaining", remaining: 12, want: 12 * time.Second},
+		{name: "remaining equals base", remaining: 30, want: 30 * time.Second},
+		{name: "remaining above base capped by base", remaining: 45, want: 30 * time.Second},
+		{name: "very large remaining still base", remaining: 300, want: 30 * time.Second},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nextPollDelay(base, tc.remaining)
+			if got != tc.want {
+				t.Fatalf("nextPollDelay(%s, %d) = %s, want %s", base, tc.remaining, got, tc.want)
+			}
+		})
 	}
 }

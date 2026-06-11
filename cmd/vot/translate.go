@@ -45,6 +45,7 @@ type messages struct {
 	FlagVoiceStyleHelp              string
 	FlagPollIntervalHelp            string
 	FlagPollAttemptsHelp            string
+	FlagMaxWaitHelp                 string
 	FlagUseYtDLPHelp                string
 	FlagYtDLPUseDirectURLHelp       string
 	FlagYtDLPCookiesHelp            string
@@ -135,7 +136,8 @@ func getMessages() messages {
 			FlagSubsURLHelp:                 "прямая ссылка на субтитры, которые помогут при переводе",
 			FlagVoiceStyleHelp:              "стиль голоса: live (по умолчанию) или tts",
 			FlagPollIntervalHelp:            "интервал опроса в секундах (не менее 30)",
-			FlagPollAttemptsHelp:            "максимальное число попыток опроса",
+			FlagPollAttemptsHelp:            "максимальное число попыток опроса (0 = без лимита, до --max-wait)",
+			FlagMaxWaitHelp:                 "максимальное время ожидания (duration, например 30m, 1h; по умолчанию 30m)",
 			FlagUseYtDLPHelp:                "использовать yt-dlp (если установлен) для работы с URL",
 			FlagYtDLPUseDirectURLHelp:       "при использовании yt-dlp передавать на backend прямой медиа‑URL вместо исходной страницы",
 			FlagYtDLPCookiesHelp:            "путь к файлу cookies, передаваемому в yt-dlp (--cookies)",
@@ -199,7 +201,8 @@ func getMessages() messages {
 			FlagSubsURLHelp:                 "direct subtitles URL to pass as translation help",
 			FlagVoiceStyleHelp:              "voice style: live (default) or tts",
 			FlagPollIntervalHelp:            "polling interval in seconds (min 30)",
-			FlagPollAttemptsHelp:            "maximum number of polling attempts",
+			FlagPollAttemptsHelp:            "maximum polling attempts (0 = unlimited, bounded by --max-wait)",
+			FlagMaxWaitHelp:                 "maximum overall wait time (duration, e.g. 30m, 1h; default 30m)",
 			FlagUseYtDLPHelp:                "use yt-dlp (if available) to assist with URL handling",
 			FlagYtDLPUseDirectURLHelp:       "when using yt-dlp, pass its direct media URL to backend instead of original URL",
 			FlagYtDLPCookiesHelp:            "path to cookies file to pass to yt-dlp (--cookies)",
@@ -270,6 +273,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		flagVoiceStyle              string
 		flagPollInterval            int
 		flagPollAttempts            int
+		flagMaxWait                 time.Duration
 		flagUseYtDLP                bool
 		flagYtDLPUseDirectURL       bool
 		flagYtDLPCookies            string
@@ -284,6 +288,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	fs.StringVar(&flagVoiceStyle, "voice-style", "live", msg.FlagVoiceStyleHelp)
 	fs.IntVar(&flagPollInterval, "poll-interval", 30, msg.FlagPollIntervalHelp)
 	fs.IntVar(&flagPollAttempts, "poll-attempts", 10, msg.FlagPollAttemptsHelp)
+	fs.DurationVar(&flagMaxWait, "max-wait", 30*time.Minute, msg.FlagMaxWaitHelp)
 	fs.BoolVar(&flagUseYtDLP, "use-yt-dlp", false, msg.FlagUseYtDLPHelp)
 	fs.BoolVar(&flagYtDLPUseDirectURL, "yt-dlp-use-direct-url", false, msg.FlagYtDLPUseDirectURLHelp)
 	fs.StringVar(&flagYtDLPCookies, "yt-dlp-cookies", "", msg.FlagYtDLPCookiesHelp)
@@ -311,8 +316,12 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		os.Exit(1)
 	}
 
-	if flagPollAttempts <= 0 {
+	if flagPollAttempts < 0 {
 		fmt.Fprintln(os.Stderr, msg.PollAttemptsInvalid)
+		os.Exit(1)
+	}
+	if flagMaxWait <= 0 {
+		fmt.Fprintf(os.Stderr, "%s: --max-wait must be positive\n", msg.ErrorPrefix)
 		os.Exit(1)
 	}
 
@@ -439,8 +448,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 	exitCode := 0
 	for _, u := range urls {
-		// Allow enough time for polling: interval * attempts + small overhead.
-		pollTimeout := time.Duration(flagPollInterval*flagPollAttempts+30) * time.Second
+		pollTimeout := flagMaxWait
 		ctx, cancel := context.WithTimeout(context.Background(), pollTimeout)
 
 		effectiveURL := u

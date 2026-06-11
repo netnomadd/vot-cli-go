@@ -30,7 +30,8 @@ type TranslateParams struct {
 	DurationSec float64
 
 	// Polling configuration (seconds between attempts, number of attempts).
-	// If zero or negative, backends fall back to their defaults.
+	// PollAttempts==0 means unlimited attempts until context timeout/cancel.
+	// If PollIntervalSec is zero or negative, backends fall back to defaults.
 	PollIntervalSec int
 	PollAttempts    int
 

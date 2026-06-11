@@ -125,7 +125,8 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 	}
 
 	attempts := p.PollAttempts
-	if attempts <= 0 {
+	unlimitedAttempts := attempts == 0
+	if attempts < 0 {
 		attempts = 10
 	}
 
@@ -135,7 +136,7 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 	path := "/video-translation/translate"
 	triedAudioRequestedFix := false
 
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := 0; unlimitedAttempts || attempt < attempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return backend.TranslateResult{}, err
 		}
@@ -168,7 +169,11 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		translationID := resp.GetTranslationId()
 		shouldRetry := resp.GetShouldRetry()
 		if p.Debug {
-			fmt.Fprintf(os.Stderr, "[debug] [direct] poll attempt %d/%d first_request=%v status=%d remaining=%d translation_id=%s should_retry=%d\n", attempt+1, attempts, firstRequest, status, remaining, translationID, shouldRetry)
+			total := "unlimited"
+			if !unlimitedAttempts {
+				total = fmt.Sprintf("%d", attempts)
+			}
+			fmt.Fprintf(os.Stderr, "[debug] [direct] poll attempt %d/%s first_request=%v status=%d remaining=%d translation_id=%s should_retry=%d\n", attempt+1, total, firstRequest, status, remaining, translationID, shouldRetry)
 		}
 
 		url := resp.GetUrl()
@@ -226,7 +231,8 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 			msg = base
 		}
 
-		if !retry || attempt == attempts-1 {
+		isLastAttempt := !unlimitedAttempts && attempt == attempts-1
+		if !retry || isLastAttempt {
 			if retry {
 				if remaining > 0 {
 					msg = fmt.Sprintf("yandex: translation still in progress after %d attempts (remaining ~%d seconds)", attempts, remaining)
@@ -238,10 +244,14 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		}
 
 		// Wait before next polling attempt.
+		wait := nextPollDelay(interval, remaining)
+		if p.Debug {
+			fmt.Fprintf(os.Stderr, "[debug] [direct] next_poll_delay=%s (base=%s remaining=%d)\n", wait, interval, remaining)
+		}
 		select {
 		case <-ctx.Done():
 			return backend.TranslateResult{}, ctx.Err()
-		case <-time.After(interval):
+		case <-time.After(wait):
 		}
 	}
 
@@ -420,6 +430,31 @@ func buildTranslationHelp(videoURL string, p backend.TranslateParams) []*yandexp
 	}
 
 	return help
+}
+
+func nextPollDelay(base time.Duration, remainingSec int32) time.Duration {
+	// Keep base behaviour when API does not provide remaining seconds.
+	if remainingSec <= 0 {
+		return base
+	}
+
+	remaining := time.Duration(remainingSec) * time.Second
+
+	// Clamp to avoid extreme sleeps while still following backend hint.
+	const minDelay = 5 * time.Second
+	const maxDelay = 60 * time.Second
+	if remaining < minDelay {
+		remaining = minDelay
+	}
+	if remaining > maxDelay {
+		remaining = maxDelay
+	}
+
+	// Don't poll slower than the user-configured base interval.
+	if remaining < base {
+		return remaining
+	}
+	return base
 }
 
 // getSession returns a cached or newly created session for the given module.
