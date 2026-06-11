@@ -135,8 +135,8 @@ func getMessages() messages {
 			FlagDirectURLHelp:               "считать входные URL прямыми ссылками на медиа (mp4/webm и т.п.)",
 			FlagSubsURLHelp:                 "прямая ссылка на субтитры, которые помогут при переводе",
 			FlagVoiceStyleHelp:              "стиль голоса: live (по умолчанию) или tts",
-			FlagPollIntervalHelp:            "интервал опроса в секундах (не менее 30)",
-			FlagPollAttemptsHelp:            "максимальное число попыток опроса (0 = без лимита, до --max-wait)",
+			FlagPollIntervalHelp:            "интервал опроса в секундах: 0 = auto-режим по remainingTime, >=30 = фиксированный интервал",
+			FlagPollAttemptsHelp:            "максимальное число попыток опроса (0 = без лимита, до --max-wait; по умолчанию 0)",
 			FlagMaxWaitHelp:                 "максимальное время ожидания (duration, например 30m, 1h; по умолчанию 30m)",
 			FlagUseYtDLPHelp:                "использовать yt-dlp (если установлен) для работы с URL",
 			FlagYtDLPUseDirectURLHelp:       "при использовании yt-dlp передавать на backend прямой медиа‑URL вместо исходной страницы",
@@ -145,13 +145,13 @@ func getMessages() messages {
 			FlagExplainHelp:                 "показать, как будет обработан каждый URL, и выйти, не обращаясь к backend'ам",
 			RespLangRequired:                "--response-lang обязателен",
 			InvalidVoiceStyle:               "--voice-style может быть только 'live' или 'tts'",
-			PollIntervalTooSmall:            "--poll-interval должен быть не менее 30 секунд",
-			PollAttemptsInvalid:             "--poll-attempts должен быть положительным числом",
+			PollIntervalTooSmall:            "--poll-interval должен быть 0 (auto) или не менее 30 секунд",
+			PollAttemptsInvalid:             "--poll-attempts должен быть неотрицательным числом",
 			FailedLoadConfigFmt:             "не удалось загрузить конфиг: %v",
 			InvalidWorkerURLFmt:             "некорректный worker URL %q: %v",
 			UnknownBackendFmt:               "неизвестный backend '%s' (ожидается 'direct' или 'worker')",
 			UnknownCommandFmt:               "неизвестная команда: %s",
-			TimeoutErrorFmt:                 "перевод не завершился за %d секунд; попробуйте увеличить --poll-attempts или --poll-interval",
+			TimeoutErrorFmt:                 "перевод не завершился за %d секунд; попробуйте увеличить --max-wait (и при необходимости --poll-attempts/--poll-interval)",
 			CanceledError:                   "перевод отменён",
 			ErrorPrefix:                     "ошибка",
 			YtDLPNotFoundFmt:                "yt-dlp включён (флаг/конфиг), но бинарник не найден в PATH: %v; продолжаю без yt-dlp",
@@ -200,8 +200,8 @@ func getMessages() messages {
 			FlagDirectURLHelp:               "treat input URL(s) as direct media URLs (mp4/webm)",
 			FlagSubsURLHelp:                 "direct subtitles URL to pass as translation help",
 			FlagVoiceStyleHelp:              "voice style: live (default) or tts",
-			FlagPollIntervalHelp:            "polling interval in seconds (min 30)",
-			FlagPollAttemptsHelp:            "maximum polling attempts (0 = unlimited, bounded by --max-wait)",
+			FlagPollIntervalHelp:            "poll interval in seconds: 0 = auto mode via remainingTime, >=30 = fixed interval",
+			FlagPollAttemptsHelp:            "maximum polling attempts (0 = unlimited, bounded by --max-wait; default 0)",
 			FlagMaxWaitHelp:                 "maximum overall wait time (duration, e.g. 30m, 1h; default 30m)",
 			FlagUseYtDLPHelp:                "use yt-dlp (if available) to assist with URL handling",
 			FlagYtDLPUseDirectURLHelp:       "when using yt-dlp, pass its direct media URL to backend instead of original URL",
@@ -210,13 +210,13 @@ func getMessages() messages {
 			FlagExplainHelp:                 "print how each URL will be handled and exit without contacting backends",
 			RespLangRequired:                "--response-lang is required",
 			InvalidVoiceStyle:               "--voice-style must be 'live' or 'tts'",
-			PollIntervalTooSmall:            "--poll-interval must be at least 30 seconds",
-			PollAttemptsInvalid:             "--poll-attempts must be positive",
+			PollIntervalTooSmall:            "--poll-interval must be 0 (auto) or at least 30 seconds",
+			PollAttemptsInvalid:             "--poll-attempts must be non-negative",
 			FailedLoadConfigFmt:             "failed to load config: %v",
 			InvalidWorkerURLFmt:             "invalid worker URL %q: %v",
 			UnknownBackendFmt:               "unknown backend '%s' (expected 'direct' or 'worker')",
 			UnknownCommandFmt:               "unknown command: %s",
-			TimeoutErrorFmt:                 "translation timed out after %d seconds; try increasing --poll-attempts or --poll-interval",
+			TimeoutErrorFmt:                 "translation timed out after %d seconds; try increasing --max-wait (and optionally --poll-attempts/--poll-interval)",
 			CanceledError:                   "translation canceled",
 			ErrorPrefix:                     "error",
 			YtDLPNotFoundFmt:                "yt-dlp is enabled (flag/config) but not found in PATH: %v; continuing without yt-dlp",
@@ -280,14 +280,15 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		flagYtDLPCookiesFromBrowser string
 		flagExplain                 bool
 	)
+	pollIntervalFlagChanged := false
 
 	fs.StringVarP(&flagReqLang, "request-lang", "s", "", msg.FlagReqLangHelp)
 	fs.StringVarP(&flagRespLang, "response-lang", "t", "ru", msg.FlagRespLangHelp)
 	fs.BoolVar(&flagDirectURL, "direct-url", false, msg.FlagDirectURLHelp)
 	fs.StringVar(&flagSubsURL, "subs-url", "", msg.FlagSubsURLHelp)
 	fs.StringVar(&flagVoiceStyle, "voice-style", "live", msg.FlagVoiceStyleHelp)
-	fs.IntVar(&flagPollInterval, "poll-interval", 30, msg.FlagPollIntervalHelp)
-	fs.IntVar(&flagPollAttempts, "poll-attempts", 10, msg.FlagPollAttemptsHelp)
+	fs.IntVar(&flagPollInterval, "poll-interval", 0, msg.FlagPollIntervalHelp)
+	fs.IntVar(&flagPollAttempts, "poll-attempts", 0, msg.FlagPollAttemptsHelp)
 	fs.DurationVar(&flagMaxWait, "max-wait", 30*time.Minute, msg.FlagMaxWaitHelp)
 	fs.BoolVar(&flagUseYtDLP, "use-yt-dlp", false, msg.FlagUseYtDLPHelp)
 	fs.BoolVar(&flagYtDLPUseDirectURL, "yt-dlp-use-direct-url", false, msg.FlagYtDLPUseDirectURLHelp)
@@ -311,7 +312,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		os.Exit(1)
 	}
 
-	if flagPollInterval < 30 {
+	if flagPollInterval != 0 && flagPollInterval < 30 {
 		fmt.Fprintln(os.Stderr, msg.PollIntervalTooSmall)
 		os.Exit(1)
 	}
@@ -323,6 +324,9 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	if flagMaxWait <= 0 {
 		fmt.Fprintf(os.Stderr, "%s: --max-wait must be positive\n", msg.ErrorPrefix)
 		os.Exit(1)
+	}
+	if f := fs.Lookup("poll-interval"); f != nil && f.Changed {
+		pollIntervalFlagChanged = true
 	}
 
 	// Load configuration (if any) and initialise direct backend client.
@@ -536,17 +540,23 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			matchedSummary = strings.Join(matchedRules, ";")
 		}
 
+		fixedPollInterval := pollIntervalFlagChanged && flagPollInterval > 0
+		pollMode := "auto"
+		if fixedPollInterval {
+			pollMode = "fixed"
+		}
+
 		if flagDebug && !flagSilent {
-			fmt.Fprintf(os.Stderr, "[debug] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v yt_dlp_cookies=%s yt_dlp_cookies_from_browser=%s source_rules=%s\n",
-				u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser, matchedSummary)
+			fmt.Fprintf(os.Stderr, "[debug] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_mode=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v yt_dlp_cookies=%s yt_dlp_cookies_from_browser=%s source_rules=%s\n",
+				u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, pollMode, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser, matchedSummary)
 		}
 
 		// In explain mode we only show how the URL would be processed and skip
 		// any calls to Yandex backends.
 		if flagExplain {
 			if !flagSilent {
-				fmt.Fprintf(os.Stderr, "[explain] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v yt_dlp_cookies=%s yt_dlp_cookies_from_browser=%s source_rules=%s\n",
-					u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser, matchedSummary)
+				fmt.Fprintf(os.Stderr, "[explain] url=%s effective_url=%s source=%s backend=%s req_lang=%s resp_lang=%s direct=%v voice_style=%s subs_url=%s poll_mode=%s poll_interval=%ds poll_attempts=%d use_yt_dlp=%v yt_dlp_use_direct_url=%v yt_dlp_cookies=%s yt_dlp_cookies_from_browser=%s source_rules=%s\n",
+					u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, pollMode, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser, matchedSummary)
 			}
 			cancel()
 			continue
@@ -570,15 +580,20 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		// Regular video translation.
 		res, err := client.TranslateVideo(ctx, backend.TranslateParams{
 			URL:             effectiveURL,
+			OriginalURL:     u,
 			RequestLang:     effectiveReqLang,
 			ResponseLang:    flagRespLang,
 			DirectURL:       directForBackend,
 			SubsURL:         flagSubsURL,
 			VoiceStyle:      voiceStyle,
 			DurationSec:     durationSec,
-			PollIntervalSec: flagPollInterval,
-			PollAttempts:    flagPollAttempts,
-			Debug:           flagDebug,
+			UseYtDLP:                useYtDLPForURL,
+			YtDLPCookies:            cookies,
+			YtDLPCookiesFromBrowser: cookiesFromBrowser,
+			PollIntervalSec:   flagPollInterval,
+			FixedPollInterval: fixedPollInterval,
+			PollAttempts:      flagPollAttempts,
+			Debug:             flagDebug,
 		})
 		cancel()
 		if err != nil {

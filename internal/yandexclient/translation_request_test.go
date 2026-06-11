@@ -124,22 +124,25 @@ func TestNextPollDelay(t *testing.T) {
 	tests := []struct {
 		name      string
 		remaining int32
+		fixed     bool
 		want      time.Duration
 	}{
-		{name: "no remaining uses base", remaining: 0, want: 30 * time.Second},
-		{name: "negative remaining uses base", remaining: -1, want: 30 * time.Second},
-		{name: "short remaining clamps to min", remaining: 1, want: 5 * time.Second},
-		{name: "remaining under base uses remaining", remaining: 12, want: 12 * time.Second},
-		{name: "remaining equals base", remaining: 30, want: 30 * time.Second},
-		{name: "remaining above base capped by base", remaining: 45, want: 30 * time.Second},
-		{name: "very large remaining still base", remaining: 300, want: 30 * time.Second},
+		{name: "auto no remaining uses base", remaining: 0, fixed: false, want: 30 * time.Second},
+		{name: "auto negative remaining uses base", remaining: -1, fixed: false, want: 30 * time.Second},
+		{name: "auto short remaining equals remaining", remaining: 1, fixed: false, want: 1 * time.Second},
+		{name: "auto remaining under base uses remaining", remaining: 12, fixed: false, want: 12 * time.Second},
+		{name: "auto remaining equals base", remaining: 30, fixed: false, want: 30 * time.Second},
+		{name: "auto remaining above base uses remaining", remaining: 45, fixed: false, want: 45 * time.Second},
+		{name: "auto very large remaining equals remaining", remaining: 300, fixed: false, want: 300 * time.Second},
+		{name: "fixed mode always uses base", remaining: 12, fixed: true, want: 30 * time.Second},
+		{name: "fixed mode ignores remaining", remaining: 45, fixed: true, want: 30 * time.Second},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := nextPollDelay(base, tc.remaining)
+			got := nextPollDelay(base, tc.remaining, tc.fixed)
 			if got != tc.want {
-				t.Fatalf("nextPollDelay(%s, %d) = %s, want %s", base, tc.remaining, got, tc.want)
+				t.Fatalf("nextPollDelay(%s, %d, fixed=%v) = %s, want %s", base, tc.remaining, tc.fixed, got, tc.want)
 			}
 		})
 	}

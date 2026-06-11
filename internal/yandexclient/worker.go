@@ -99,15 +99,16 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		encodeRequest: c.encodeTranslationRequest,
 		secHeaders:    c.secYaHeaders,
 		sendTranslate: c.doWorkerProtoRequest,
-		applyAudioFix: func(ctx context.Context, sess *clientSession, videoURL, translationID string) error {
+		applyAudioFix: func(ctx context.Context, sess *clientSession, videoURL, translationID, fileID string, audio []byte, chunked bool, chunkLen int) error {
 			if err := c.requestVtransFailAudio(ctx, videoURL); err != nil {
 				return fmt.Errorf("at fail-audio-js: %w", err)
 			}
-			if err := c.requestVtransAudio(ctx, sess, videoURL, translationID); err != nil {
+			if err := c.requestVtransAudio(ctx, sess, videoURL, translationID, fileID, audio, chunked, chunkLen); err != nil {
 				return fmt.Errorf("at audio upload: %w", err)
 			}
 			return nil
 		},
+		resolveAudioData: resolveAudioDataForUpload,
 	})
 }
 
@@ -133,13 +134,50 @@ func (c *WorkerClient) requestVtransFailAudio(ctx context.Context, videoURL stri
 	return nil
 }
 
-func (c *WorkerClient) requestVtransAudio(ctx context.Context, sess *clientSession, videoURL, translationID string) error {
+func (c *WorkerClient) requestVtransAudio(ctx context.Context, sess *clientSession, videoURL, translationID, fileID string, audio []byte, chunked bool, chunkLen int) error {
+	if chunked && len(audio) > 0 {
+		if chunkLen <= 0 {
+			chunkLen = chooseChunkSize(len(audio))
+		}
+		totalParts := (len(audio) + chunkLen - 1) / chunkLen
+		for part := 0; part < totalParts; part++ {
+			start := part * chunkLen
+			end := start + chunkLen
+			if end > len(audio) {
+				end = len(audio)
+			}
+			bodyMsg := &yandexproto.VideoTranslationAudioRequest{
+				TranslationId: translationID,
+				Url:           videoURL,
+				PartialAudioInfo: &yandexproto.ChunkAudioObject{
+					AudioBuffer: &yandexproto.PartialAudioBufferObject{
+						ChunkId:   int32(part),
+						AudioFile: audio[start:end],
+					},
+					AudioPartsLength: int32(totalParts),
+					FileId:           fileID,
+					Version:          1,
+				},
+			}
+			body, err := proto.Marshal(bodyMsg)
+			if err != nil {
+				return err
+			}
+			path := "/video-translation/audio"
+			headers := c.secYaHeaders("Vtrans", sess, body, path)
+			if _, err := c.doWorkerProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
+				return fmt.Errorf("chunk %d/%d upload failed via worker: %w", part+1, totalParts, err)
+			}
+		}
+		return nil
+	}
+
 	bodyMsg := &yandexproto.VideoTranslationAudioRequest{
 		TranslationId: translationID,
 		Url:           videoURL,
 		AudioInfo: &yandexproto.AudioBufferObject{
-			AudioFile: []byte{},
-			FileId:    defaultAudioFileID,
+			AudioFile: audio,
+			FileId:    fileID,
 		},
 	}
 	body, err := proto.Marshal(bodyMsg)

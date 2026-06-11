@@ -13,6 +13,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -109,15 +111,16 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 				headers["Authorization"] = "OAuth " + c.apiToken
 			}
 		},
-		applyAudioFix: func(ctx context.Context, sess *clientSession, videoURL, translationID string) error {
+		applyAudioFix: func(ctx context.Context, sess *clientSession, videoURL, translationID, fileID string, audio []byte, chunked bool, chunkLen int) error {
 			if err := c.requestVtransFailAudio(ctx, videoURL); err != nil {
 				return fmt.Errorf("at fail-audio-js: %w", err)
 			}
-			if err := c.requestVtransAudio(ctx, sess, videoURL, translationID); err != nil {
+			if err := c.requestVtransAudio(ctx, sess, videoURL, translationID, fileID, audio, chunked, chunkLen); err != nil {
 				return fmt.Errorf("at audio upload: %w", err)
 			}
 			return nil
 		},
+		resolveAudioData: resolveAudioDataForUpload,
 	})
 }
 
@@ -165,13 +168,51 @@ func (c *DirectClient) requestVtransFailAudio(ctx context.Context, videoURL stri
 	return nil
 }
 
-func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSession, videoURL, translationID string) error {
+func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSession, videoURL, translationID, fileID string, audio []byte, chunked bool, chunkLen int) error {
+	if chunked && len(audio) > 0 {
+		if chunkLen <= 0 {
+			chunkLen = chooseChunkSize(len(audio))
+		}
+		totalParts := (len(audio) + chunkLen - 1) / chunkLen
+		for part := 0; part < totalParts; part++ {
+			start := part * chunkLen
+			end := start + chunkLen
+			if end > len(audio) {
+				end = len(audio)
+			}
+
+			bodyMsg := &yandexproto.VideoTranslationAudioRequest{
+				TranslationId: translationID,
+				Url:           videoURL,
+				PartialAudioInfo: &yandexproto.ChunkAudioObject{
+					AudioBuffer: &yandexproto.PartialAudioBufferObject{
+						ChunkId:   int32(part),
+						AudioFile: audio[start:end],
+					},
+					AudioPartsLength: int32(totalParts),
+					FileId:           fileID,
+					Version:          1,
+				},
+			}
+			body, err := proto.Marshal(bodyMsg)
+			if err != nil {
+				return err
+			}
+			path := "/video-translation/audio"
+			headers := c.secYaHeaders("Vtrans", sess, body, path)
+			if _, err := c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
+				return fmt.Errorf("chunk %d/%d upload failed: %w", part+1, totalParts, err)
+			}
+		}
+		return nil
+	}
+
 	bodyMsg := &yandexproto.VideoTranslationAudioRequest{
 		TranslationId: translationID,
 		Url:           videoURL,
 		AudioInfo: &yandexproto.AudioBufferObject{
-			AudioFile: []byte{},
-			FileId:    defaultAudioFileID,
+			AudioFile: audio,
+			FileId:    fileID,
 		},
 	}
 	body, err := proto.Marshal(bodyMsg)
@@ -183,6 +224,48 @@ func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 	headers := c.secYaHeaders("Vtrans", sess, body, path)
 	_, err = c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers)
 	return err
+}
+
+func resolveAudioDataForUpload(ctx context.Context, p backend.TranslateParams, _ string) (*audioUploadPayload, bool) {
+	if !p.UseYtDLP {
+		return nil, false
+	}
+	audioFixURL, ok := youtubeAudioWorkaroundURL(p.URL)
+	if !ok {
+		return nil, false
+	}
+	candidateURL := p.URL
+	if p.OriginalURL != "" {
+		candidateURL = p.OriginalURL
+	}
+
+	if _, err := exec.LookPath("yt-dlp"); err != nil {
+		return nil, false
+	}
+	directURL, err := resolveDirectURLWithYtDLP(candidateURL, p.YtDLPCookies, p.YtDLPCookiesFromBrowser)
+	if err != nil {
+		if p.Debug {
+			fmt.Fprintf(os.Stderr, "[debug] [direct] AUDIO_REQUESTED: yt-dlp direct URL resolution failed: %v\n", err)
+		}
+		return nil, false
+	}
+
+	audioBytes, err := downloadAudioWithYtDLP(ctx, candidateURL, p.YtDLPCookies, p.YtDLPCookiesFromBrowser)
+	if err != nil {
+		if p.Debug {
+			fmt.Fprintf(os.Stderr, "[debug] [direct] AUDIO_REQUESTED: yt-dlp audio download failed, using empty payload fallback: %v\n", err)
+		}
+		return nil, false
+	}
+
+	fileID := buildAudioFileID(selectAudioDownloadType(directURL), 5*1024*1024, len(audioBytes))
+	return &audioUploadPayload{
+		videoURL: audioFixURL,
+		fileID:   fileID,
+		audio:    audioBytes,
+		chunked:  true,
+		chunkLen: chooseChunkSize(len(audioBytes)),
+	}, true
 }
 
 // TranslateStream implements backend.Client.TranslateStream.
@@ -295,29 +378,15 @@ func buildTranslationHelp(videoURL string, p backend.TranslateParams) []*yandexp
 	return help
 }
 
-func nextPollDelay(base time.Duration, remainingSec int32) time.Duration {
-	// Keep base behaviour when API does not provide remaining seconds.
+func nextPollDelay(base time.Duration, remainingSec int32, fixedInterval bool) time.Duration {
+	if fixedInterval {
+		return base
+	}
+	// In auto mode rely on backend hint when available.
 	if remainingSec <= 0 {
 		return base
 	}
-
-	remaining := time.Duration(remainingSec) * time.Second
-
-	// Clamp to avoid extreme sleeps while still following backend hint.
-	const minDelay = 5 * time.Second
-	const maxDelay = 60 * time.Second
-	if remaining < minDelay {
-		remaining = minDelay
-	}
-	if remaining > maxDelay {
-		remaining = maxDelay
-	}
-
-	// Don't poll slower than the user-configured base interval.
-	if remaining < base {
-		return remaining
-	}
-	return base
+	return time.Duration(remainingSec) * time.Second
 }
 
 // getSession returns a cached or newly created session for the given module.

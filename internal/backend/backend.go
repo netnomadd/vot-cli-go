@@ -16,6 +16,7 @@ const (
 // TranslateParams contains high-level parameters for a VOT video translation request.
 type TranslateParams struct {
 	URL          string
+	OriginalURL  string
 	RequestLang  string
 	ResponseLang string
 	DirectURL    bool
@@ -29,11 +30,20 @@ type TranslateParams struct {
 	// backends fall back to their internal default (e.g. 343s).
 	DurationSec float64
 
+	// Optional yt-dlp settings used by backend-side recovery flows
+	// (for example AUDIO_REQUESTED real-audio upload).
+	UseYtDLP                bool
+	YtDLPCookies            string
+	YtDLPCookiesFromBrowser string
+
 	// Polling configuration (seconds between attempts, number of attempts).
 	// PollAttempts==0 means unlimited attempts until context timeout/cancel.
 	// If PollIntervalSec is zero or negative, backends fall back to defaults.
-	PollIntervalSec int
-	PollAttempts    int
+	// FixedPollInterval=true means always sleep PollIntervalSec between attempts.
+	// FixedPollInterval=false means prefer API remainingTime when available.
+	PollIntervalSec    int
+	FixedPollInterval  bool
+	PollAttempts       int
 
 	// Debug enables verbose backend-level logging (wired from CLI --debug).
 	Debug bool
