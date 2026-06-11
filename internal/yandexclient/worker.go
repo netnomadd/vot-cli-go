@@ -128,13 +128,15 @@ func (c *WorkerClient) requestVtransFailAudio(ctx context.Context, videoURL stri
 	if err := json.Unmarshal(resBytes, &resp); err != nil {
 		return err
 	}
-	if resp.Status != 1 {
+	if resp.Status != 1 && resp.Status != 0 {
 		return fmt.Errorf("unexpected fail-audio-js status via worker: %d", resp.Status)
 	}
 	return nil
 }
 
 func (c *WorkerClient) requestVtransAudio(ctx context.Context, sess *clientSession, videoURL, translationID, fileID string, audio []byte, chunked bool, chunkLen int) error {
+	const maxUploadAttempts = 3
+
 	if chunked && len(audio) > 0 {
 		if chunkLen <= 0 {
 			chunkLen = chooseChunkSize(len(audio))
@@ -165,8 +167,26 @@ func (c *WorkerClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 			}
 			path := "/video-translation/audio"
 			headers := c.secYaHeaders("Vtrans", sess, body, path)
-			if _, err := c.doWorkerProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
-				return fmt.Errorf("chunk %d/%d upload failed via worker: %w", part+1, totalParts, err)
+			var uploadErr error
+			for uploadAttempt := 1; uploadAttempt <= maxUploadAttempts; uploadAttempt++ {
+				if _, err := c.doWorkerProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
+					uploadErr = err
+					if uploadAttempt < maxUploadAttempts && isTransientAudioUploadError(err) {
+						backoff := time.Duration(uploadAttempt) * time.Second
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-time.After(backoff):
+						}
+						continue
+					}
+					break
+				}
+				uploadErr = nil
+				break
+			}
+			if uploadErr != nil {
+				return fmt.Errorf("chunk %d/%d upload failed via worker: %w", part+1, totalParts, uploadErr)
 			}
 		}
 		return nil
@@ -186,8 +206,25 @@ func (c *WorkerClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 	}
 	path := "/video-translation/audio"
 	headers := c.secYaHeaders("Vtrans", sess, body, path)
-	_, err = c.doWorkerProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers)
-	return err
+	var uploadErr error
+	for uploadAttempt := 1; uploadAttempt <= maxUploadAttempts; uploadAttempt++ {
+		if _, err = c.doWorkerProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
+			uploadErr = err
+			if uploadAttempt < maxUploadAttempts && isTransientAudioUploadError(err) {
+				backoff := time.Duration(uploadAttempt) * time.Second
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(backoff):
+				}
+				continue
+			}
+			break
+		}
+		uploadErr = nil
+		break
+	}
+	return uploadErr
 }
 
 // TranslateStream mirrors DirectClient.TranslateStream but uses the worker
@@ -340,6 +377,15 @@ func (c *WorkerClient) doWorkerProtoRequest(ctx context.Context, path string, bo
 func (c *WorkerClient) doWorkerProtoRequestWithMethod(ctx context.Context, method, path string, body []byte, extraHeaders map[string]string) ([]byte, error) {
 	url := c.schema + "://" + c.host + path
 
+	requestCtx := ctx
+	if method == http.MethodPut && path == "/video-translation/audio" {
+		if _, ok := requestCtx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			requestCtx, cancel = context.WithTimeout(ctx, 5*time.Minute)
+			defer cancel()
+		}
+	}
+
 	headers := map[string]string{
 		"User-Agent":      c.userAgent,
 		"Accept":          "application/x-protobuf",
@@ -371,13 +417,20 @@ func (c *WorkerClient) doWorkerProtoRequestWithMethod(ctx context.Context, metho
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(requestCtx, method, url, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	client := c.httpClient
+	if method == http.MethodPut && path == "/video-translation/audio" {
+		clientCopy := *c.httpClient
+		clientCopy.Timeout = 0
+		client = &clientCopy
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

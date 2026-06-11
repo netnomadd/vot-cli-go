@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -178,6 +179,23 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 				}
 				if err := opts.applyAudioFix(ctx, sess, payload.videoURL, translationID, payload.fileID, payload.audio, payload.chunked, payload.chunkLen); err != nil {
 					if payload.chunked || len(payload.audio) > 0 {
+						// Some servers reject partial/chunked upload transport-wise.
+						// Retry once with the same real audio as a full payload.
+						if payload.chunked && len(payload.audio) > 0 {
+							if p.Debug {
+								fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: chunked upload failed (%v), retrying full real-audio upload\n", opts.backendName, err)
+							}
+							if errFull := opts.applyAudioFix(ctx, sess, payload.videoURL, translationID, payload.fileID, payload.audio, false, 0); errFull == nil {
+								if p.Debug {
+									fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: real-audio upload success (mode=full)\n", opts.backendName)
+								}
+								triedAudioRequestedFix = true
+								attempt--
+								continue
+							} else if p.Debug {
+								fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: full real-audio retry failed (%v), falling back to fake audio payload\n", opts.backendName, errFull)
+							}
+						}
 						if p.Debug {
 							fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: real audio upload failed (%v), falling back to fake audio payload\n", opts.backendName, err)
 						}
@@ -195,6 +213,13 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 						}
 					}
 					return backend.TranslateResult{}, fmt.Errorf("yandex: AUDIO_REQUESTED fix%s failed: %w", backendMsgSuffix(opts.backendName), err)
+				}
+				if p.Debug && len(payload.audio) > 0 {
+					mode := "full"
+					if payload.chunked {
+						mode = "chunked"
+					}
+					fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: real-audio upload success (mode=%s)\n", opts.backendName, mode)
 				}
 				triedAudioRequestedFix = true
 				attempt--
@@ -284,6 +309,22 @@ func chooseChunkSize(total int) int {
 	}
 }
 
+func isTransientAudioUploadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if ne, ok := err.(net.Error); ok {
+		return ne.Timeout() || ne.Temporary()
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "use of closed network connection") ||
+		strings.Contains(msg, "connection reset by peer") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "internal_error") ||
+		strings.Contains(msg, "http/1.x transport connection broken") ||
+		strings.Contains(msg, "malformed http response")
+}
+
 func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -317,7 +358,19 @@ func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string)
 }
 
 func downloadAudioWithYtDLP(ctx context.Context, videoURL, cookiesFile, cookiesFromBrowser string) ([]byte, error) {
-	childCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	// Give yt-dlp enough time on long videos; a hard 2-minute limit often
+	// kills download right before completion and prevents chunked upload.
+	timeout := 20 * time.Minute
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline) - time.Minute
+		if remaining <= 0 {
+			return nil, context.DeadlineExceeded
+		}
+		if remaining < timeout {
+			timeout = remaining
+		}
+	}
+	childCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	args := []string{"-f", "bestaudio", "-o", "-", videoURL}

@@ -162,13 +162,17 @@ func (c *DirectClient) requestVtransFailAudio(ctx context.Context, videoURL stri
 	if err := json.Unmarshal(resBytes, &resp); err != nil {
 		return err
 	}
-	if resp.Status != 1 {
+	// Some sessions return 0 when fail-audio was already marked before.
+	// Treat it as non-fatal so we can continue with audio upload fallback.
+	if resp.Status != 1 && resp.Status != 0 {
 		return fmt.Errorf("unexpected fail-audio-js status: %d", resp.Status)
 	}
 	return nil
 }
 
 func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSession, videoURL, translationID, fileID string, audio []byte, chunked bool, chunkLen int) error {
+	const maxUploadAttempts = 3
+
 	if chunked && len(audio) > 0 {
 		if chunkLen <= 0 {
 			chunkLen = chooseChunkSize(len(audio))
@@ -200,8 +204,26 @@ func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 			}
 			path := "/video-translation/audio"
 			headers := c.secYaHeaders("Vtrans", sess, body, path)
-			if _, err := c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
-				return fmt.Errorf("chunk %d/%d upload failed: %w", part+1, totalParts, err)
+			var uploadErr error
+			for uploadAttempt := 1; uploadAttempt <= maxUploadAttempts; uploadAttempt++ {
+				if _, err := c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
+					uploadErr = err
+					if uploadAttempt < maxUploadAttempts && isTransientAudioUploadError(err) {
+						backoff := time.Duration(uploadAttempt) * time.Second
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-time.After(backoff):
+						}
+						continue
+					}
+					break
+				}
+				uploadErr = nil
+				break
+			}
+			if uploadErr != nil {
+				return fmt.Errorf("chunk %d/%d upload failed: %w", part+1, totalParts, uploadErr)
 			}
 		}
 		return nil
@@ -222,8 +244,25 @@ func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 
 	path := "/video-translation/audio"
 	headers := c.secYaHeaders("Vtrans", sess, body, path)
-	_, err = c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers)
-	return err
+	var uploadErr error
+	for uploadAttempt := 1; uploadAttempt <= maxUploadAttempts; uploadAttempt++ {
+		if _, err = c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
+			uploadErr = err
+			if uploadAttempt < maxUploadAttempts && isTransientAudioUploadError(err) {
+				backoff := time.Duration(uploadAttempt) * time.Second
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(backoff):
+				}
+				continue
+			}
+			break
+		}
+		uploadErr = nil
+		break
+	}
+	return uploadErr
 }
 
 func resolveAudioDataForUpload(ctx context.Context, p backend.TranslateParams, _ string) (*audioUploadPayload, bool) {
@@ -447,7 +486,18 @@ func (c *DirectClient) doProtoRequest(ctx context.Context, path string, body []b
 func (c *DirectClient) doProtoRequestWithMethod(ctx context.Context, method, path string, body []byte, extraHeaders map[string]string) ([]byte, error) {
 	url := c.schema + "://" + c.host + path
 
-	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+	requestCtx := ctx
+	// Audio upload can take much longer than regular API requests, especially
+	// in chunked mode with large payloads.
+	if method == http.MethodPut && path == "/video-translation/audio" {
+		if _, ok := requestCtx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			requestCtx, cancel = context.WithTimeout(ctx, 5*time.Minute)
+			defer cancel()
+		}
+	}
+
+	req, err := http.NewRequestWithContext(requestCtx, method, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +513,16 @@ func (c *DirectClient) doProtoRequestWithMethod(ctx context.Context, method, pat
 		req.Header.Set(k, v)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	client := c.httpClient
+	if method == http.MethodPut && path == "/video-translation/audio" {
+		// Use request context for deadline control instead of the shared 30s
+		// client timeout; otherwise large chunk uploads fail prematurely.
+		clientCopy := *c.httpClient
+		clientCopy.Timeout = 0
+		client = &clientCopy
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
