@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -94,148 +93,22 @@ func (c *WorkerClient) SetAPIToken(token string) {
 // TranslateVideo mirrors DirectClient.TranslateVideo but uses the worker
 // transport instead of talking to Yandex directly.
 func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslateParams) (backend.TranslateResult, error) {
-	// Ensure session (per worker)
-	sess, err := c.getSession(ctx, "video-translation")
-	if err != nil {
-		return backend.TranslateResult{}, err
-	}
-
-	const defaultDuration = 343.0
-	dur := defaultDuration
-	if p.DurationSec > 0 {
-		dur = p.DurationSec
-	}
-
-	interval := time.Duration(p.PollIntervalSec) * time.Second
-	if interval <= 0 {
-		interval = 30 * time.Second
-	}
-	if interval < 30*time.Second {
-		interval = 30 * time.Second
-	}
-
-	attempts := p.PollAttempts
-	unlimitedAttempts := attempts == 0
-	if attempts < 0 {
-		attempts = 10
-	}
-
-	path := "/video-translation/translate"
-	triedAudioRequestedFix := false
-
-	for attempt := 0; unlimitedAttempts || attempt < attempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return backend.TranslateResult{}, err
-		}
-
-		firstRequest := true
-		body, err := c.encodeTranslationRequest(p.URL, dur, p.RequestLang, p.ResponseLang, p, firstRequest)
-		if err != nil {
-			return backend.TranslateResult{}, err
-		}
-
-		vtransHeaders := c.secYaHeaders("Vtrans", sess, body, path)
-
-		resBytes, err := c.doWorkerProtoRequest(ctx, path, body, vtransHeaders)
-		if err != nil {
-			return backend.TranslateResult{}, err
-		}
-
-		var resp yandexproto.VideoTranslationResponse
-		if err := proto.Unmarshal(resBytes, &resp); err != nil {
-			return backend.TranslateResult{}, err
-		}
-
-		status := resp.GetStatus()
-		remaining := resp.GetRemainingTime()
-		translationID := resp.GetTranslationId()
-		shouldRetry := resp.GetShouldRetry()
-		if p.Debug {
-			total := "unlimited"
-			if !unlimitedAttempts {
-				total = fmt.Sprintf("%d", attempts)
+	return translateVideoWithPolling(ctx, p, translateVideoPollOptions{
+		backendName:   "worker",
+		getSession:    c.getSession,
+		encodeRequest: c.encodeTranslationRequest,
+		secHeaders:    c.secYaHeaders,
+		sendTranslate: c.doWorkerProtoRequest,
+		applyAudioFix: func(ctx context.Context, sess *clientSession, videoURL, translationID string) error {
+			if err := c.requestVtransFailAudio(ctx, videoURL); err != nil {
+				return fmt.Errorf("at fail-audio-js: %w", err)
 			}
-			fmt.Fprintf(os.Stderr, "[debug] [worker] poll attempt %d/%s first_request=%v status=%d remaining=%d translation_id=%s should_retry=%d\n", attempt+1, total, firstRequest, status, remaining, translationID, shouldRetry)
-		}
-
-		url := resp.GetUrl()
-		if url != "" {
-			return backend.TranslateResult{
-				AudioURL:      url,
-				Duration:      resp.GetDuration(),
-				DetectedLang:  resp.GetLanguage(),
-				IsLivelyVoice: resp.GetIsLivelyVoice(),
-			}, nil
-		}
-
-		msg := resp.GetMessage()
-
-		retry := false
-		switch status {
-		case 2, 3, 6: // WAITING / LONG_WAITING / AUDIO_REQUESTED
-			audioFixURL, canApplyAudioFix := youtubeAudioWorkaroundURL(p.URL)
-			if status == 6 && !triedAudioRequestedFix && canApplyAudioFix {
-				if translationID == "" {
-					msg = "yandex: AUDIO_REQUESTED returned empty translationId via worker"
-					break
-				}
-				if p.Debug {
-					fmt.Fprintf(os.Stderr, "[debug] [worker] AUDIO_REQUESTED: sending fail-audio/audio workaround for translation_id=%s video_url=%s\n", translationID, audioFixURL)
-				}
-				if err := c.requestVtransFailAudio(ctx, audioFixURL); err != nil {
-					return backend.TranslateResult{}, fmt.Errorf("yandex: AUDIO_REQUESTED fix via worker failed at fail-audio-js: %w", err)
-				}
-				if err := c.requestVtransAudio(ctx, sess, audioFixURL, translationID); err != nil {
-					return backend.TranslateResult{}, fmt.Errorf("yandex: AUDIO_REQUESTED fix via worker failed at audio upload: %w", err)
-				}
-				triedAudioRequestedFix = true
-				attempt--
-				continue
+			if err := c.requestVtransAudio(ctx, sess, videoURL, translationID); err != nil {
+				return fmt.Errorf("at audio upload: %w", err)
 			}
-			retry = true
-		case 7: // SESSION_REQUIRED – requires authenticated Yandex account / browser session
-			if msg == "" {
-				msg = "yandex: this video requires an authenticated Yandex session (worker, SESSION_REQUIRED). This usually means the video is restricted to logged-in Yandex Browser users; the CLI cannot bypass this."
-			} else {
-				msg = fmt.Sprintf("yandex: this video requires an authenticated Yandex session (worker, SESSION_REQUIRED): %s", msg)
-			}
-		default:
-			base := ""
-			if msg == "" {
-				base = fmt.Sprintf("yandex: translation not ready or failed via worker (status=%d, empty url)", status)
-			} else {
-				base = fmt.Sprintf("yandex: translation not ready or failed via worker (status=%d): %s", status, msg)
-			}
-			if p.DirectURL {
-				base += " (unsupported direct URL: this media link may not be accepted by the worker backend; try passing the original page URL or disabling direct-url / yt-dlp direct mode)"
-			}
-			msg = base
-		}
-
-		isLastAttempt := !unlimitedAttempts && attempt == attempts-1
-		if !retry || isLastAttempt {
-			if retry {
-				if remaining > 0 {
-					msg = fmt.Sprintf("yandex: translation still in progress via worker after %d attempts (remaining ~%d seconds)", attempts, remaining)
-				} else if msg == "" {
-					msg = fmt.Sprintf("yandex: translation still in progress via worker after %d attempts", attempts)
-				}
-			}
-			return backend.TranslateResult{}, errors.New(msg)
-		}
-
-		wait := nextPollDelay(interval, remaining)
-		if p.Debug {
-			fmt.Fprintf(os.Stderr, "[debug] [worker] next_poll_delay=%s (base=%s remaining=%d)\n", wait, interval, remaining)
-		}
-		select {
-		case <-ctx.Done():
-			return backend.TranslateResult{}, ctx.Err()
-		case <-time.After(wait):
-		}
-	}
-
-	return backend.TranslateResult{}, errors.New("yandex: translation not ready after polling (worker)")
+			return nil
+		},
+	})
 }
 
 func (c *WorkerClient) requestVtransFailAudio(ctx context.Context, videoURL string) error {
