@@ -3,14 +3,18 @@ package yandexclient
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -67,10 +71,11 @@ type clientSession struct {
 const (
 	defaultSchema           = "https"
 	defaultHost             = "api.browser.yandex.ru"
-	defaultUserAgent        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 YaBrowser/25.4.0.0 Safari/537.36"
-	defaultComponentVersion = "25.6.0.2259"
+	defaultUserAgent        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 YaBrowser/26.4.1.1026 Yowser/2.5 Safari/537.36"
+	defaultComponentVersion = "26.4.1.1026"
 	defaultHMACKey          = "bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf"
 	defaultTimeout          = 30 * time.Second
+	defaultAudioFileID      = "web_api_get_all_generating_urls_data_from_iframe"
 )
 
 // NewDirectClient creates a DirectClient with sane defaults.
@@ -128,13 +133,15 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 	respLang := p.ResponseLang
 
 	path := "/video-translation/translate"
+	triedAudioRequestedFix := false
 
 	for attempt := 0; attempt < attempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return backend.TranslateResult{}, err
 		}
 
-		body, err := c.encodeTranslationRequest(p.URL, dur, reqLang, respLang, p)
+		firstRequest := true
+		body, err := c.encodeTranslationRequest(p.URL, dur, reqLang, respLang, p, firstRequest)
 		if err != nil {
 			return backend.TranslateResult{}, err
 		}
@@ -159,7 +166,7 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		status := resp.GetStatus()
 		remaining := resp.GetRemainingTime()
 		if p.Debug {
-			fmt.Fprintf(os.Stderr, "[debug] [direct] poll attempt %d/%d status=%d remaining=%d\n", attempt+1, attempts, status, remaining)
+			fmt.Fprintf(os.Stderr, "[debug] [direct] poll attempt %d/%d first_request=%v status=%d remaining=%d\n", attempt+1, attempts, firstRequest, status, remaining)
 		}
 
 		url := resp.GetUrl()
@@ -178,6 +185,26 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		retry := false
 		switch status {
 		case 2, 3, 6: // WAITING / LONG_WAITING / AUDIO_REQUESTED
+			audioFixURL, canApplyAudioFix := youtubeAudioWorkaroundURL(p.URL)
+			if status == 6 && !triedAudioRequestedFix && canApplyAudioFix {
+				translationID := resp.GetTranslationId()
+				if translationID == "" {
+					msg = "yandex: AUDIO_REQUESTED returned empty translationId"
+					break
+				}
+				if p.Debug {
+					fmt.Fprintf(os.Stderr, "[debug] [direct] AUDIO_REQUESTED: sending fail-audio/audio workaround for translation_id=%s video_url=%s\n", translationID, audioFixURL)
+				}
+				if err := c.requestVtransFailAudio(ctx, audioFixURL); err != nil {
+					return backend.TranslateResult{}, fmt.Errorf("yandex: AUDIO_REQUESTED fix failed at fail-audio-js: %w", err)
+				}
+				if err := c.requestVtransAudio(ctx, sess, audioFixURL, translationID); err != nil {
+					return backend.TranslateResult{}, fmt.Errorf("yandex: AUDIO_REQUESTED fix failed at audio upload: %w", err)
+				}
+				triedAudioRequestedFix = true
+				attempt--
+				continue
+			}
 			retry = true
 		case 7: // SESSION_REQUIRED – requires authenticated Yandex account / browser session
 			if msg == "" {
@@ -218,6 +245,70 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 	}
 
 	return backend.TranslateResult{}, errors.New("yandex: translation not ready after polling")
+}
+
+func youtubeAudioWorkaroundURL(rawURL string) (string, bool) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed == nil {
+		return "", false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "youtu.be" {
+		id := strings.Trim(parsed.Path, "/")
+		return "https://youtu.be/" + id, id != ""
+	}
+	if host == "youtube.com" || host == "www.youtube.com" || host == "m.youtube.com" {
+		id := strings.TrimSpace(parsed.Query().Get("v"))
+		if id == "" {
+			return "", false
+		}
+		return "https://youtu.be/" + id, true
+	}
+	return "", false
+}
+
+func (c *DirectClient) requestVtransFailAudio(ctx context.Context, videoURL string) error {
+	payload := map[string]string{"video_url": videoURL}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	resBytes, err := c.doJSONRequest(ctx, http.MethodPut, "/video-translation/fail-audio-js", data)
+	if err != nil {
+		return err
+	}
+
+	var resp struct {
+		Status int `json:"status"`
+	}
+	if err := json.Unmarshal(resBytes, &resp); err != nil {
+		return err
+	}
+	if resp.Status != 1 {
+		return fmt.Errorf("unexpected fail-audio-js status: %d", resp.Status)
+	}
+	return nil
+}
+
+func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSession, videoURL, translationID string) error {
+	bodyMsg := &yandexproto.VideoTranslationAudioRequest{
+		TranslationId: translationID,
+		Url:           videoURL,
+		AudioInfo: &yandexproto.AudioBufferObject{
+			AudioFile: []byte{},
+			FileId:    defaultAudioFileID,
+		},
+	}
+	body, err := proto.Marshal(bodyMsg)
+	if err != nil {
+		return err
+	}
+
+	path := "/video-translation/audio"
+	headers := c.secYaHeaders("Vtrans", sess, body, path)
+	_, err = c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers)
+	return err
 }
 
 // TranslateStream implements backend.Client.TranslateStream.
@@ -289,10 +380,10 @@ func (c *DirectClient) TranslateStream(ctx context.Context, p backend.StreamPara
 }
 
 // encodeTranslationRequest maps high-level params to protobuf request.
-func (c *DirectClient) encodeTranslationRequest(url string, duration float64, reqLang, respLang string, p backend.TranslateParams) ([]byte, error) {
+func (c *DirectClient) encodeTranslationRequest(url string, duration float64, reqLang, respLang string, p backend.TranslateParams, firstRequest bool) ([]byte, error) {
 	msg := &yandexproto.VideoTranslationRequest{
 		Url:              url,
-		FirstRequest:     true,
+		FirstRequest:     firstRequest,
 		Duration:         duration,
 		Unknown0:         1,
 		Language:         reqLang,
@@ -305,11 +396,29 @@ func (c *DirectClient) encodeTranslationRequest(url string, duration float64, re
 		BypassCache:      p.BypassCache,
 		UseLivelyVoice:   p.VoiceStyle == backend.VoiceStyleLive,
 		VideoTitle:       p.VideoTitle,
+		TranslationHelp:  buildTranslationHelp(url, p),
 	}
 
-	// translationHelp (subs / video url) пока не заполняем; добавим позже при обсуждении.
-
 	return proto.Marshal(msg)
+}
+
+func buildTranslationHelp(videoURL string, p backend.TranslateParams) []*yandexproto.VideoTranslationHelpObject {
+	help := make([]*yandexproto.VideoTranslationHelpObject, 0, 2)
+
+	if p.DirectURL && videoURL != "" {
+		help = append(help, &yandexproto.VideoTranslationHelpObject{
+			Target:    "video_file_url",
+			TargetUrl: videoURL,
+		})
+	}
+	if p.SubsURL != "" {
+		help = append(help, &yandexproto.VideoTranslationHelpObject{
+			Target:    "subtitles_file_url",
+			TargetUrl: p.SubsURL,
+		})
+	}
+
+	return help
 }
 
 // getSession returns a cached or newly created session for the given module.
@@ -364,9 +473,13 @@ func (c *DirectClient) createSession(ctx context.Context, module string) (*clien
 
 // doProtoRequest sends a protobuf POST request to Yandex API and returns raw body bytes.
 func (c *DirectClient) doProtoRequest(ctx context.Context, path string, body []byte, extraHeaders map[string]string) ([]byte, error) {
+	return c.doProtoRequestWithMethod(ctx, http.MethodPost, path, body, extraHeaders)
+}
+
+func (c *DirectClient) doProtoRequestWithMethod(ctx context.Context, method, path string, body []byte, extraHeaders map[string]string) ([]byte, error) {
 	url := c.schema + "://" + c.host + path
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -392,6 +505,31 @@ func (c *DirectClient) doProtoRequest(ctx context.Context, path string, body []b
 		if resp.StatusCode == http.StatusForbidden {
 			return nil, fmt.Errorf("yandex: unexpected status %s (HTTP 403 Forbidden). The API refused the request – this may mean your config (token/HMAC/user-agent) is invalid, the video/site is not supported, or access is temporarily blocked.", resp.Status)
 		}
+		return nil, fmt.Errorf("yandex: unexpected status %s from API", resp.Status)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+func (c *DirectClient) doJSONRequest(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	url := c.schema + "://" + c.host + path
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Language", "en")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("yandex: unexpected status %s from API", resp.Status)
 	}
 
@@ -426,11 +564,17 @@ func (c *DirectClient) secYaHeaders(secType string, sess *clientSession, body []
 
 // randomUUID32 generates 32 hex digits UUID (same format as getUUID in JS).
 func randomUUID32() string {
-	const hexDigits = "0123456789ABCDEF"
-	b := make([]byte, 32)
-	for i := 0; i < 32; i++ {
-		// it's not cryptographically secure; it's enough for session UUID
-		b[i] = hexDigits[time.Now().UnixNano()%16]
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err == nil {
+		return strings.ToUpper(hex.EncodeToString(raw))
 	}
-	return string(b)
+
+	// Fallback path should be practically unreachable, but keeps behaviour
+	// deterministic if random source is unavailable.
+	const hexDigits = "0123456789ABCDEF"
+	out := make([]byte, 32)
+	for i := 0; i < 32; i++ {
+		out[i] = hexDigits[time.Now().UnixNano()%16]
+	}
+	return string(out)
 }

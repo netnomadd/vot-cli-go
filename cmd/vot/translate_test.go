@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/netnomadd/vot-cli-go/internal/config"
@@ -124,5 +126,21 @@ func TestBuiltInSourceRulesFollowWorkerAvailability(t *testing.T) {
 
 	if backend != "" {
 		t.Fatalf("expected no built-in worker override when worker backend is unavailable, got %q", backend)
+	}
+}
+
+func TestYtDLPCookiesParentDirCheck(t *testing.T) {
+	td := t.TempDir()
+	good := filepath.Join(td, "cookies.txt")
+	if got := normalizeYtDLPCookiesPath(good); got != good {
+		t.Fatalf("expected valid path to pass through, got %q", got)
+	}
+
+	bad := "/definitely/missing/dir/cookies.txt"
+	if os.PathSeparator == '\\' {
+		bad = `Z:\definitely\missing\dir\cookies.txt`
+	}
+	if got := normalizeYtDLPCookiesPath(bad); got != "" {
+		t.Fatalf("expected invalid path to be dropped, got %q", got)
 	}
 }

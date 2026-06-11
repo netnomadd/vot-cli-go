@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -456,6 +457,12 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		effectiveVoiceStyle = applySourceVoiceStyle(u, sourceRules, effectiveVoiceStyle, voiceStyleFlagChanged)
 		cookies, cookiesFromBrowser := applySourceYtDLPCookies(u, sourceRules, ytDLPCookies, ytDLPCookiesFromBrowser, ytDLPCookiesFlagChanged, ytDLPCookiesFromBrowserFlagChanged)
 		effectiveURL = applySourceURLRewrites(effectiveURL, sourceRules)
+		if normalized := normalizeYtDLPCookiesPath(cookies); normalized == "" && cookies != "" {
+			if !flagSilent {
+				fmt.Fprintf(os.Stderr, "[warn] yt-dlp cookies path %q is unusable (parent dir missing); ignoring --cookies for this URL\n", cookies)
+			}
+			cookies = ""
+		}
 
 		// Optionally use yt-dlp to resolve a direct media URL and obtain duration.
 		if useYtDLPForURL {
@@ -1018,4 +1025,16 @@ func matchedSourceRuleSummaries(rawURL string, rules []sourceRule) []string {
 		}
 	}
 	return summaries
+}
+
+func normalizeYtDLPCookiesPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	dir := filepath.Dir(path)
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return ""
+	}
+	return path
 }

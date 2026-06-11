@@ -120,13 +120,15 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 	}
 
 	path := "/video-translation/translate"
+	triedAudioRequestedFix := false
 
 	for attempt := 0; attempt < attempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return backend.TranslateResult{}, err
 		}
 
-		body, err := c.encodeTranslationRequest(p.URL, dur, p.RequestLang, p.ResponseLang, p)
+		firstRequest := true
+		body, err := c.encodeTranslationRequest(p.URL, dur, p.RequestLang, p.ResponseLang, p, firstRequest)
 		if err != nil {
 			return backend.TranslateResult{}, err
 		}
@@ -146,7 +148,7 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		status := resp.GetStatus()
 		remaining := resp.GetRemainingTime()
 		if p.Debug {
-			fmt.Fprintf(os.Stderr, "[debug] [worker] poll attempt %d/%d status=%d remaining=%d\n", attempt+1, attempts, status, remaining)
+			fmt.Fprintf(os.Stderr, "[debug] [worker] poll attempt %d/%d first_request=%v status=%d remaining=%d\n", attempt+1, attempts, firstRequest, status, remaining)
 		}
 
 		url := resp.GetUrl()
@@ -164,6 +166,26 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		retry := false
 		switch status {
 		case 2, 3, 6: // WAITING / LONG_WAITING / AUDIO_REQUESTED
+			audioFixURL, canApplyAudioFix := youtubeAudioWorkaroundURL(p.URL)
+			if status == 6 && !triedAudioRequestedFix && canApplyAudioFix {
+				translationID := resp.GetTranslationId()
+				if translationID == "" {
+					msg = "yandex: AUDIO_REQUESTED returned empty translationId via worker"
+					break
+				}
+				if p.Debug {
+					fmt.Fprintf(os.Stderr, "[debug] [worker] AUDIO_REQUESTED: sending fail-audio/audio workaround for translation_id=%s video_url=%s\n", translationID, audioFixURL)
+				}
+				if err := c.requestVtransFailAudio(ctx, audioFixURL); err != nil {
+					return backend.TranslateResult{}, fmt.Errorf("yandex: AUDIO_REQUESTED fix via worker failed at fail-audio-js: %w", err)
+				}
+				if err := c.requestVtransAudio(ctx, sess, audioFixURL, translationID); err != nil {
+					return backend.TranslateResult{}, fmt.Errorf("yandex: AUDIO_REQUESTED fix via worker failed at audio upload: %w", err)
+				}
+				triedAudioRequestedFix = true
+				attempt--
+				continue
+			}
 			retry = true
 		case 7: // SESSION_REQUIRED – requires authenticated Yandex account / browser session
 			if msg == "" {
@@ -203,6 +225,47 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 	}
 
 	return backend.TranslateResult{}, errors.New("yandex: translation not ready after polling (worker)")
+}
+
+func (c *WorkerClient) requestVtransFailAudio(ctx context.Context, videoURL string) error {
+	payload := map[string]string{"video_url": videoURL}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	resBytes, err := c.doWorkerJSONRequest(ctx, http.MethodPut, "/video-translation/fail-audio-js", data)
+	if err != nil {
+		return err
+	}
+	var resp struct {
+		Status int `json:"status"`
+	}
+	if err := json.Unmarshal(resBytes, &resp); err != nil {
+		return err
+	}
+	if resp.Status != 1 {
+		return fmt.Errorf("unexpected fail-audio-js status via worker: %d", resp.Status)
+	}
+	return nil
+}
+
+func (c *WorkerClient) requestVtransAudio(ctx context.Context, sess *clientSession, videoURL, translationID string) error {
+	bodyMsg := &yandexproto.VideoTranslationAudioRequest{
+		TranslationId: translationID,
+		Url:           videoURL,
+		AudioInfo: &yandexproto.AudioBufferObject{
+			AudioFile: []byte{},
+			FileId:    defaultAudioFileID,
+		},
+	}
+	body, err := proto.Marshal(bodyMsg)
+	if err != nil {
+		return err
+	}
+	path := "/video-translation/audio"
+	headers := c.secYaHeaders("Vtrans", sess, body, path)
+	_, err = c.doWorkerProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers)
+	return err
 }
 
 // TranslateStream mirrors DirectClient.TranslateStream but uses the worker
@@ -274,10 +337,10 @@ func (c *WorkerClient) TranslateStream(ctx context.Context, p backend.StreamPara
 
 // encodeTranslationRequest is a copy of DirectClient.encodeTranslationRequest
 // but bound to WorkerClient fields.
-func (c *WorkerClient) encodeTranslationRequest(url string, duration float64, reqLang, respLang string, p backend.TranslateParams) ([]byte, error) {
+func (c *WorkerClient) encodeTranslationRequest(url string, duration float64, reqLang, respLang string, p backend.TranslateParams, firstRequest bool) ([]byte, error) {
 	msg := &yandexproto.VideoTranslationRequest{
 		Url:              url,
-		FirstRequest:     true,
+		FirstRequest:     firstRequest,
 		Duration:         duration,
 		Unknown0:         1,
 		Language:         reqLang,
@@ -349,6 +412,10 @@ func (c *WorkerClient) createSession(ctx context.Context, module string) (*clien
 // into a JSON envelope with headers and body bytes, and returns raw response
 // bytes (protobuf-encoded).
 func (c *WorkerClient) doWorkerProtoRequest(ctx context.Context, path string, body []byte, extraHeaders map[string]string) ([]byte, error) {
+	return c.doWorkerProtoRequestWithMethod(ctx, http.MethodPost, path, body, extraHeaders)
+}
+
+func (c *WorkerClient) doWorkerProtoRequestWithMethod(ctx context.Context, method, path string, body []byte, extraHeaders map[string]string) ([]byte, error) {
 	url := c.schema + "://" + c.host + path
 
 	headers := map[string]string{
@@ -382,7 +449,7 @@ func (c *WorkerClient) doWorkerProtoRequest(ctx context.Context, path string, bo
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, err
 	}
@@ -401,6 +468,26 @@ func (c *WorkerClient) doWorkerProtoRequest(ctx context.Context, path string, bo
 		return nil, fmt.Errorf("worker: unexpected status %s from backend", resp.Status)
 	}
 
+	return io.ReadAll(resp.Body)
+}
+
+func (c *WorkerClient) doWorkerJSONRequest(ctx context.Context, method, path string, jsonBody []byte) ([]byte, error) {
+	url := c.schema + "://" + c.host + path
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("worker: unexpected status %s from backend", resp.Status)
+	}
 	return io.ReadAll(resp.Body)
 }
 
