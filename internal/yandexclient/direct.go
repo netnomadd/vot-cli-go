@@ -3,8 +3,8 @@ package yandexclient
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -60,6 +60,12 @@ func (c *DirectClient) SetAPIToken(token string) {
 	if token != "" {
 		c.apiToken = token
 	}
+}
+
+// SetHTTPProxy configures an HTTP(S) proxy for Yandex API requests.
+// An empty value restores the default transport (env proxies still apply).
+func (c *DirectClient) SetHTTPProxy(proxyURL string) error {
+	return applyHTTPProxy(c.httpClient, proxyURL)
 }
 
 type clientSession struct {
@@ -281,7 +287,7 @@ func resolveAudioDataForUpload(ctx context.Context, p backend.TranslateParams, _
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		return nil, false
 	}
-	directURL, err := resolveDirectURLWithYtDLP(candidateURL, p.YtDLPCookies, p.YtDLPCookiesFromBrowser)
+	directURL, err := resolveDirectURLWithYtDLP(candidateURL, p.YtDLPCookies, p.YtDLPCookiesFromBrowser, p.HTTPProxy)
 	if err != nil {
 		if p.Debug {
 			fmt.Fprintf(os.Stderr, "[debug] [direct] AUDIO_REQUESTED: yt-dlp direct URL resolution failed: %v\n", err)
@@ -289,7 +295,7 @@ func resolveAudioDataForUpload(ctx context.Context, p backend.TranslateParams, _
 		return nil, false
 	}
 
-	audioBytes, err := downloadAudioWithYtDLP(ctx, candidateURL, p.YtDLPCookies, p.YtDLPCookiesFromBrowser)
+	audioBytes, err := downloadAudioWithYtDLP(ctx, candidateURL, p.YtDLPCookies, p.YtDLPCookiesFromBrowser, p.HTTPProxy)
 	if err != nil {
 		if p.Debug {
 			fmt.Fprintf(os.Stderr, "[debug] [direct] AUDIO_REQUESTED: yt-dlp audio download failed, using empty payload fallback: %v\n", err)

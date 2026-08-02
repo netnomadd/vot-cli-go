@@ -104,8 +104,13 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
 - `-c, --config` — путь к конфигурационному файлу;
 - `-q, --silent` — "тихий" режим: в stdout только итог (URL или путь к файлу), сообщения об ошибках — в stderr;
 - `--json` — один JSON-документ с итогами батча в stdout (без прогресса; перекрывает `--silent`);
+- `--proxy` — HTTP(S) прокси `[http://][user:pass@]host:port` для запросов к Yandex/worker и скачивания аудио;
 - `-d, --debug` — подробный отладочный вывод;
 - `--lang` — язык UI-сообщений (`ru`, `en` и т.п.).
+
+Опции `translate`, связанные с прокси:
+
+- `--proxy-yt-dlp` — передавать тот же прокси в `yt-dlp` (по умолчанию `true`; отключить: `--proxy-yt-dlp=false`).
 
 ## Конфигурационный файл
 
@@ -129,6 +134,7 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
   "yt_dlp_use_direct_url": true,
   "yt_dlp_cookies": "/path/to/cookies.txt",
   "yt_dlp_cookies_from_browser": "firefox",
+  "proxy": "http://127.0.0.1:7890",
   "source_rules": [
     {
       "patterns": [
@@ -160,6 +166,7 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
 - `yt_dlp_use_direct_url` — при `true` backends получают уже «распакованный» прямой URL от `yt-dlp`, при `false` — исходный URL (напр. страница YouTube);
 - `yt_dlp_cookies` — путь к cookies-файлу, который будет передан в `yt-dlp` как `--cookies` (для сайтов, где без авторизации/куков доступ ограничен);
 - `yt_dlp_cookies_from_browser` — значение для `yt-dlp --cookies-from-browser` (например, `firefox` или `chrome:Profile 1`), если удобнее брать cookies из браузера;
+- `proxy` — HTTP(S) прокси по умолчанию (переопределяется флагом `--proxy` или `VOT_PROXY`);
 - `source_rules` — (опционально) массив правил для конкретных источников: каждое правило содержит регулярное выражение `pattern` или массив `patterns` (для нескольких URL), флаги `use_yt_dlp`/`yt_dlp_use_direct_url` и, при необходимости, поля `request_lang`/`backend`/`voice_style`/`yt_dlp_cookies`/`yt_dlp_cookies_from_browser` и массив переписывателей `rewrite`, позволяя тонко настраивать поведение для разных сайтов без перекомпиляции бинарника.
 
 ### Правила источников (`source_rules`)
@@ -176,7 +183,8 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
 - `VOT_USER_AGENT` → `user_agent`;
 - `VOT_YANDEX_HMAC_KEY` → `yandex_hmac_key`;
 - `VOT_YANDEX_TOKEN` → `yandex_token`;
-- `VOT_WORKER_URL` → `worker_url`.
+- `VOT_WORKER_URL` → `worker_url`;
+- `VOT_PROXY` → `proxy`.
 
 Пример:
 
@@ -251,6 +259,21 @@ vot translate --response-lang=ru "https://youtu.be/..."
 ```
 
 Код выхода: `0`, если ни один URL не завершился ошибкой; иначе `1`. При `--json` вместе с `--silent` ошибки не дублируются в stderr (остаются только в JSON).
+
+## Прокси
+
+Флаг `--proxy` (или `proxy` / `VOT_PROXY`) задаёт HTTP(S) прокси для:
+
+- запросов к backend `direct` / `worker`;
+- скачивания готового аудио (`--outdir` / `--outfile`);
+- вызовов `yt-dlp` (по умолчанию; отключается `--proxy-yt-dlp=false`).
+
+Формат: `[http://|https://][user:pass@]host:port`. Bare `host:port` трактуется как `http://host:port`. SOCKS пока не поддерживается.
+
+```bash
+vot translate --proxy=http://127.0.0.1:7890 --response-lang=ru "https://youtu.be/..."
+vot translate --proxy=http://user:pass@proxy.example:8080 --proxy-yt-dlp=false "https://youtu.be/..."
+```
 
 ## Скачивание аудио
 

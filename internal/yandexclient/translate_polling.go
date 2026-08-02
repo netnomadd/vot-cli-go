@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/netnomadd/vot-cli-go/internal/backend"
+	"github.com/netnomadd/vot-cli-go/internal/proxyutil"
 	"github.com/netnomadd/vot-cli-go/internal/yandexproto"
 )
 
@@ -325,7 +326,7 @@ func isTransientAudioUploadError(err error) bool {
 		strings.Contains(msg, "malformed http response")
 }
 
-func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string) (string, error) {
+func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser, proxyURL string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -336,6 +337,7 @@ func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string)
 	if cookiesFromBrowser != "" {
 		args = append(args, "--cookies-from-browser", cookiesFromBrowser)
 	}
+	args = proxyutil.AppendYtDLPArgs(args, proxyURL)
 	args = append(args, videoURL)
 
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
@@ -357,7 +359,7 @@ func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string)
 	return "", fmt.Errorf("yt-dlp did not return a direct URL")
 }
 
-func downloadAudioWithYtDLP(ctx context.Context, videoURL, cookiesFile, cookiesFromBrowser string) ([]byte, error) {
+func downloadAudioWithYtDLP(ctx context.Context, videoURL, cookiesFile, cookiesFromBrowser, proxyURL string) ([]byte, error) {
 	// Give yt-dlp enough time on long videos; a hard 2-minute limit often
 	// kills download right before completion and prevents chunked upload.
 	timeout := 20 * time.Minute
@@ -380,6 +382,7 @@ func downloadAudioWithYtDLP(ctx context.Context, videoURL, cookiesFile, cookiesF
 	if cookiesFromBrowser != "" {
 		args = append([]string{"--cookies-from-browser", cookiesFromBrowser}, args...)
 	}
+	args = proxyutil.AppendYtDLPArgs(args, proxyURL)
 
 	cmd := exec.CommandContext(childCtx, "yt-dlp", args...)
 	out, err := cmd.Output()

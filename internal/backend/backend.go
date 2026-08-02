@@ -35,6 +35,8 @@ type TranslateParams struct {
 	UseYtDLP                bool
 	YtDLPCookies            string
 	YtDLPCookiesFromBrowser string
+	// Optional HTTP(S) proxy URL passed to yt-dlp (--proxy) during recovery.
+	HTTPProxy string
 	// If true, AUDIO_REQUESTED handler attempts real-audio upload first.
 	// If false, it follows vot.js-like behaviour (fake/empty audio payload only).
 	AudioRequestedRealUpload bool
@@ -44,9 +46,9 @@ type TranslateParams struct {
 	// If PollIntervalSec is zero or negative, backends fall back to defaults.
 	// FixedPollInterval=true means always sleep PollIntervalSec between attempts.
 	// FixedPollInterval=false means prefer API remainingTime when available.
-	PollIntervalSec    int
-	FixedPollInterval  bool
-	PollAttempts       int
+	PollIntervalSec   int
+	FixedPollInterval bool
+	PollAttempts      int
 
 	// Debug enables verbose backend-level logging (wired from CLI --debug).
 	Debug bool

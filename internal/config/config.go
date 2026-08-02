@@ -83,6 +83,10 @@ type Config struct {
 	YtDLPCookies            string `json:"yt_dlp_cookies"`
 	YtDLPCookiesFromBrowser string `json:"yt_dlp_cookies_from_browser"`
 
+	// Optional HTTP(S) proxy for Yandex/worker requests, audio download, and
+	// (by default) yt-dlp. Format: [http://][user:pass@]host:port
+	Proxy string `json:"proxy"`
+
 	// Optional per-source rules that can tweak yt-dlp usage and direct URL
 	// handling depending on the URL pattern. When empty, only built-in rules
 	// are used.

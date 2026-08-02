@@ -90,6 +90,12 @@ func (c *WorkerClient) SetAPIToken(token string) {
 	_ = token
 }
 
+// SetHTTPProxy configures an HTTP(S) proxy for worker requests.
+// An empty value restores the default transport (env proxies still apply).
+func (c *WorkerClient) SetHTTPProxy(proxyURL string) error {
+	return applyHTTPProxy(c.httpClient, proxyURL)
+}
+
 // TranslateVideo mirrors DirectClient.TranslateVideo but uses the worker
 // transport instead of talking to Yandex directly.
 func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslateParams) (backend.TranslateResult, error) {

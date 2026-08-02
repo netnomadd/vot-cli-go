@@ -24,6 +24,9 @@ func applyConfigEnvOverrides(cfg *config.Config) {
 	if workerURL := os.Getenv("VOT_WORKER_URL"); workerURL != "" {
 		cfg.WorkerURL = workerURL
 	}
+	if proxy := os.Getenv("VOT_PROXY"); proxy != "" {
+		cfg.Proxy = proxy
+	}
 }
 
 func configuredWorkerURL(cfg *config.Config) string {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/netnomadd/vot-cli-go/internal/backend"
 	"github.com/netnomadd/vot-cli-go/internal/config"
+	"github.com/netnomadd/vot-cli-go/internal/proxyutil"
 	"github.com/netnomadd/vot-cli-go/internal/yandexclient"
 )
 
@@ -34,6 +35,7 @@ type messages struct {
 	GlobalOptionsLang    string
 	GlobalOptionsBackend string
 	GlobalOptionsJSON    string
+	GlobalOptionsProxy   string
 	HelpHint             string
 
 	// Translate command
@@ -58,12 +60,14 @@ type messages struct {
 	FlagOutfileHelp                  string
 	FlagNoTitleHelp                  string
 	FlagKeepURLHelp                  string
+	FlagProxyYtDLPHelp               string
 	RespLangRequired                 string
 	InvalidVoiceStyle                string
 	PollIntervalTooSmall             string
 	PollAttemptsInvalid              string
 	OutfileNeedsSingleURL            string
 	OutfileMustBeBareName            string
+	InvalidProxyFmt                  string
 	FailedLoadConfigFmt              string
 	InvalidWorkerURLFmt              string
 	UnknownBackendFmt                string
@@ -140,6 +144,7 @@ func getMessages() messages {
 			GlobalOptionsLang:    "язык сообщений CLI (например, ru, en)",
 			GlobalOptionsBackend: "backend для перевода: direct или worker",
 			GlobalOptionsJSON:    "вывести итог в stdout как JSON (без прогресса; перекрывает --silent)",
+			GlobalOptionsProxy:   "HTTP(S) прокси: [http://][user:pass@]host:port (Yandex/worker, скачивание; yt-dlp — см. --proxy-yt-dlp)",
 			HelpHint:             "запустите 'vot <команда> --help' для справки по опциям команды",
 
 			UsageTranslate:                   "использование: vot translate [опции] <url> [url2 ...]",
@@ -163,12 +168,14 @@ func getMessages() messages {
 			FlagOutfileHelp:                  "имя выходного файла (только для одного URL; иначе videoId/title.mp3)",
 			FlagNoTitleHelp:                  "в имени файла использовать videoId/hash, не title из yt-dlp",
 			FlagKeepURLHelp:                  "при скачивании дополнительно печатать URL (plain: path<TAB>url; в --json оба поля всегда)",
+			FlagProxyYtDLPHelp:               "передавать --proxy в yt-dlp (по умолчанию включено, если задан прокси)",
 			RespLangRequired:                 "--response-lang обязателен",
 			InvalidVoiceStyle:                "--voice-style может быть только 'live' или 'tts'",
 			PollIntervalTooSmall:             "--poll-interval должен быть 0 (auto) или не менее 30 секунд",
 			PollAttemptsInvalid:              "--poll-attempts должен быть неотрицательным числом",
 			OutfileNeedsSingleURL:            "--outfile можно использовать только с одним URL",
 			OutfileMustBeBareName:            "--outfile должен быть именем файла без пути",
+			InvalidProxyFmt:                  "некорректный --proxy %q: %v",
 			FailedLoadConfigFmt:              "не удалось загрузить конфиг: %v",
 			InvalidWorkerURLFmt:              "некорректный worker URL %q: %v",
 			UnknownBackendFmt:                "неизвестный backend '%s' (ожидается 'direct' или 'worker')",
@@ -216,6 +223,7 @@ func getMessages() messages {
 			GlobalOptionsLang:    "UI language (e.g. ru, en)",
 			GlobalOptionsBackend: "backend to use: direct or worker",
 			GlobalOptionsJSON:    "write final result to stdout as JSON (no progress; overrides --silent)",
+			GlobalOptionsProxy:   "HTTP(S) proxy: [http://][user:pass@]host:port (Yandex/worker, download; yt-dlp via --proxy-yt-dlp)",
 			HelpHint:             "run 'vot <command> --help' for command-specific options",
 
 			UsageTranslate:                   "usage: vot translate [options] <url> [url2 ...]",
@@ -239,12 +247,14 @@ func getMessages() messages {
 			FlagOutfileHelp:                  "output file name (single URL only; otherwise videoId/title.mp3)",
 			FlagNoTitleHelp:                  "use videoId/hash in file name instead of yt-dlp title",
 			FlagKeepURLHelp:                  "when downloading, also print the audio URL (plain: path<TAB>url; always both fields with --json)",
+			FlagProxyYtDLPHelp:               "pass --proxy to yt-dlp (enabled by default when a proxy is set)",
 			RespLangRequired:                 "--response-lang is required",
 			InvalidVoiceStyle:                "--voice-style must be 'live' or 'tts'",
 			PollIntervalTooSmall:             "--poll-interval must be 0 (auto) or at least 30 seconds",
 			PollAttemptsInvalid:              "--poll-attempts must be non-negative",
 			OutfileNeedsSingleURL:            "--outfile can only be used with a single URL",
 			OutfileMustBeBareName:            "--outfile must be a bare file name, not a path",
+			InvalidProxyFmt:                  "invalid --proxy %q: %v",
 			FailedLoadConfigFmt:              "failed to load config: %v",
 			InvalidWorkerURLFmt:              "invalid worker URL %q: %v",
 			UnknownBackendFmt:                "unknown backend '%s' (expected 'direct' or 'worker')",
@@ -320,6 +330,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		flagOutfile                  string
 		flagNoTitle                  bool
 		flagKeepURL                  bool
+		flagProxyYtDLP               bool
 	)
 	pollIntervalFlagChanged := false
 
@@ -342,6 +353,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	fs.StringVar(&flagOutfile, "outfile", "", msg.FlagOutfileHelp)
 	fs.BoolVar(&flagNoTitle, "no-title", false, msg.FlagNoTitleHelp)
 	fs.BoolVar(&flagKeepURL, "keep-url", false, msg.FlagKeepURLHelp)
+	fs.BoolVar(&flagProxyYtDLP, "proxy-yt-dlp", true, msg.FlagProxyYtDLPHelp)
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -408,6 +420,30 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		if os.Getenv("VOT_WORKER_URL") != "" {
 			fmt.Fprintln(os.Stderr, "[debug] using worker URL from VOT_WORKER_URL")
 		}
+		if os.Getenv("VOT_PROXY") != "" {
+			fmt.Fprintln(os.Stderr, "[debug] using proxy from VOT_PROXY")
+		}
+	}
+
+	// Effective proxy: explicit --proxy wins over config/env.
+	effectiveProxy := ""
+	if cfg != nil {
+		effectiveProxy = cfg.Proxy
+	}
+	if f := fs.Lookup("proxy"); f != nil && f.Changed {
+		effectiveProxy = flagProxy
+	}
+	if effectiveProxy != "" {
+		normalized, err := proxyutil.Normalize(effectiveProxy)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidProxyFmt+"\n", msg.ErrorPrefix, effectiveProxy, err)
+			os.Exit(1)
+		}
+		effectiveProxy = normalized
+	}
+	ytDLPProxy := ""
+	if flagProxyYtDLP {
+		ytDLPProxy = effectiveProxy
 	}
 
 	// If config defines a default target language and the user did not
@@ -503,6 +539,17 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			os.Exit(1)
 		}
 	}
+	if err := directClient.SetHTTPProxy(effectiveProxy); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidProxyFmt+"\n", msg.ErrorPrefix, effectiveProxy, err)
+		os.Exit(1)
+	}
+	if err := workerClient.SetHTTPProxy(effectiveProxy); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidProxyFmt+"\n", msg.ErrorPrefix, effectiveProxy, err)
+		os.Exit(1)
+	}
+	if flagDebug && !flagSilent && effectiveProxy != "" {
+		fmt.Fprintf(os.Stderr, "[debug] using HTTP proxy %s (yt-dlp proxy=%v)\n", effectiveProxy, flagProxyYtDLP)
+	}
 
 	quietStderr := flagSilent || useJSON
 	exitCode := 0
@@ -553,7 +600,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 		// Optionally use yt-dlp to resolve a direct media URL and obtain duration.
 		if useYtDLPForURL {
-			if d, err := getVideoDurationWithYtDLP(effectiveURL, cookies, cookiesFromBrowser); err != nil {
+			if d, err := getVideoDurationWithYtDLP(effectiveURL, cookies, cookiesFromBrowser, ytDLPProxy); err != nil {
 				if !quietStderr {
 					if flagDebug {
 						fmt.Fprintf(os.Stderr, "[debug] yt-dlp failed to get duration for %s: %v\n", effectiveURL, err)
@@ -568,7 +615,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 				}
 			}
 
-			if directURL, err := resolveDirectURLWithYtDLP(effectiveURL, cookies, cookiesFromBrowser); err != nil {
+			if directURL, err := resolveDirectURLWithYtDLP(effectiveURL, cookies, cookiesFromBrowser, ytDLPProxy); err != nil {
 				if !quietStderr {
 					if flagDebug {
 						fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolution failed for %s: %v\n", effectiveURL, err)
@@ -695,6 +742,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			UseYtDLP:                 useYtDLPForURL,
 			YtDLPCookies:             cookies,
 			YtDLPCookiesFromBrowser:  cookiesFromBrowser,
+			HTTPProxy:                ytDLPProxy,
 			AudioRequestedRealUpload: flagAudioRequestedRealUpload,
 			PollIntervalSec:          flagPollInterval,
 			FixedPollInterval:        fixedPollInterval,
@@ -731,7 +779,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			if !flagNoTitle {
 				// Use the original page URL so yt-dlp can resolve a title even when
 				// the backend request was rewritten to a direct media URL.
-				if t, titleErr := getVideoTitleWithYtDLP(u, cookies, cookiesFromBrowser); titleErr != nil {
+				if t, titleErr := getVideoTitleWithYtDLP(u, cookies, cookiesFromBrowser, ytDLPProxy); titleErr != nil {
 					if flagDebug && !quietStderr {
 						fmt.Fprintf(os.Stderr, "[debug] yt-dlp title lookup failed for %s: %v\n", u, titleErr)
 					}
@@ -754,7 +802,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			}
 
 			dlCtx, dlCancel := context.WithTimeout(context.Background(), 15*time.Minute)
-			dlErr := downloadHTTPFile(dlCtx, res.AudioURL, dest)
+			dlErr := downloadHTTPFile(dlCtx, res.AudioURL, dest, effectiveProxy)
 			dlCancel()
 			if dlErr != nil {
 				errText := fmt.Sprintf(msg.DownloadFailedFmt, u, dlErr)
@@ -814,7 +862,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 
 // resolveDirectURLWithYtDLP tries to obtain a direct media URL for the given
 // video URL using the local yt-dlp binary (if present in PATH).
-func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string) (string, error) {
+func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser, proxyURL string) (string, error) {
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		return "", fmt.Errorf("yt-dlp not found in PATH: %w", err)
 	}
@@ -829,6 +877,7 @@ func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string)
 	if cookiesFromBrowser != "" {
 		args = append(args, "--cookies-from-browser", cookiesFromBrowser)
 	}
+	args = proxyutil.AppendYtDLPArgs(args, proxyURL)
 	args = append(args, videoURL)
 
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
@@ -866,7 +915,7 @@ func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string)
 
 // getVideoDurationWithYtDLP asks yt-dlp to print video duration (in seconds)
 // for the given URL and parses it into float64.
-func getVideoDurationWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string) (float64, error) {
+func getVideoDurationWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser, proxyURL string) (float64, error) {
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		return 0, fmt.Errorf("yt-dlp not found in PATH: %w", err)
 	}
@@ -881,6 +930,7 @@ func getVideoDurationWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string)
 	if cookiesFromBrowser != "" {
 		args = append(args, "--cookies-from-browser", cookiesFromBrowser)
 	}
+	args = proxyutil.AppendYtDLPArgs(args, proxyURL)
 	args = append(args, videoURL)
 
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)

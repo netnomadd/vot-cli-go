@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/netnomadd/vot-cli-go/internal/proxyutil"
 )
 
 var (
@@ -24,7 +26,8 @@ var (
 )
 
 // downloadHTTPFile streams fileURL into destPath using a temp file + rename.
-func downloadHTTPFile(ctx context.Context, fileURL, destPath string) error {
+// proxyURL is an optional HTTP(S) proxy (empty = direct / env proxies).
+func downloadHTTPFile(ctx context.Context, fileURL, destPath, proxyURL string) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
@@ -35,6 +38,9 @@ func downloadHTTPFile(ctx context.Context, fileURL, destPath string) error {
 	}
 
 	client := &http.Client{Timeout: 15 * time.Minute}
+	if err := proxyutil.ApplyHTTPClient(client, proxyURL); err != nil {
+		return fmt.Errorf("configure download proxy: %w", err)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("download request failed: %w", err)
@@ -224,7 +230,7 @@ func resolveAudioOutputPath(outdir, outfile, inputURL, title string, noTitle boo
 }
 
 // getVideoTitleWithYtDLP asks yt-dlp for a human-readable title.
-func getVideoTitleWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string) (string, error) {
+func getVideoTitleWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser, proxyURL string) (string, error) {
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		return "", fmt.Errorf("yt-dlp not found in PATH: %w", err)
 	}
@@ -239,6 +245,7 @@ func getVideoTitleWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser string) (s
 	if cookiesFromBrowser != "" {
 		args = append(args, "--cookies-from-browser", cookiesFromBrowser)
 	}
+	args = proxyutil.AppendYtDLPArgs(args, proxyURL)
 	args = append(args, videoURL)
 
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)

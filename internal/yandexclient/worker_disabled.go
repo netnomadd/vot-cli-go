@@ -27,6 +27,8 @@ func (c *WorkerClient) SetHMACKey(string) {}
 
 func (c *WorkerClient) SetAPIToken(string) {}
 
+func (c *WorkerClient) SetHTTPProxy(string) error { return nil }
+
 func (c *WorkerClient) SetWorkerURL(string) error {
 	return nil
 }

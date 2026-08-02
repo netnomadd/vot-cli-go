@@ -8,6 +8,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/netnomadd/vot-cli-go/internal/config"
+	"github.com/netnomadd/vot-cli-go/internal/proxyutil"
 	"github.com/netnomadd/vot-cli-go/internal/yandexclient"
 )
 
@@ -67,7 +68,25 @@ func doctorMain(parent *flag.FlagSet, args []string) {
 	printEnvStatus("VOT_YANDEX_HMAC_KEY")
 	printEnvStatus("VOT_YANDEX_TOKEN")
 	printEnvStatus("VOT_WORKER_URL")
+	printEnvStatus("VOT_PROXY")
 	printEnvStatus("VOT_LANG")
+
+	proxy := ""
+	if cfg != nil {
+		proxy = cfg.Proxy
+	}
+	if f := fs.Lookup("proxy"); f != nil && f.Changed {
+		proxy = flagProxy
+	}
+	if proxy != "" {
+		if normalized, err := proxyutil.Normalize(proxy); err != nil {
+			fmt.Fprintf(os.Stderr, "  proxy: invalid %q: %v\n", proxy, err)
+		} else {
+			fmt.Fprintf(os.Stderr, "  proxy: %s\n", normalized)
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "  proxy: not set")
+	}
 
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, msg.DoctorWorkerHeader)
