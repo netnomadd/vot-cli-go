@@ -318,6 +318,7 @@ func (c *WorkerClient) encodeTranslationRequest(url string, duration float64, re
 		BypassCache:      p.BypassCache,
 		UseLivelyVoice:   p.VoiceStyle == backend.VoiceStyleLive,
 		VideoTitle:       p.VideoTitle,
+		TranslationHelp:  buildTranslationHelp(url, p),
 	}
 	return proto.Marshal(msg)
 }

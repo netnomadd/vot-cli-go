@@ -16,6 +16,7 @@ var (
 	flagBackend string
 	flagJSON    bool
 	flagProxy   string
+	flagVotHost string
 )
 
 func printRootUsage(root *flag.FlagSet) {
@@ -41,6 +42,7 @@ func main() {
 	root.StringVar(&flagBackend, "backend", "direct", msg.GlobalOptionsBackend)
 	root.BoolVar(&flagJSON, "json", false, msg.GlobalOptionsJSON)
 	root.StringVar(&flagProxy, "proxy", "", msg.GlobalOptionsProxy)
+	root.StringVar(&flagVotHost, "vot-host", "", msg.GlobalOptionsVotHost)
 
 	root.Usage = func() { printRootUsage(root) }
 

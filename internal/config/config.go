@@ -71,6 +71,9 @@ type Config struct {
 	YandexHMACKey string `json:"yandex_hmac_key"`
 	YandexToken   string `json:"yandex_token"`
 	WorkerURL     string `json:"worker_url"`
+	// Optional FOSWLY vot-backend base URL (scheme+host+optional /v1 path).
+	// Used automatically for custom media links (m3u8/mpd/m4a/…).
+	VotHost string `json:"vot_host"`
 
 	// Optional default target language for translations when --response-lang
 	// не указан явно. Если пусто, по умолчанию используется "ru".

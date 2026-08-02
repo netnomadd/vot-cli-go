@@ -107,8 +107,14 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
 - `-q, --silent` — "тихий" режим: в stdout только итог (URL или путь к файлу), сообщения об ошибках — в stderr;
 - `--json` — один JSON-документ с итогами батча в stdout (без прогресса; перекрывает `--silent`);
 - `--proxy` — HTTP(S) прокси `[http://][user:pass@]host:port` для запросов к Yandex/worker и скачивания аудио;
+- `--vot-host` — базовый URL [vot-backend](https://github.com/FOSWLY/vot-backend) (по умолчанию `https://vot.toil.cc/v1`); используется для custom media (`m3u8`/`mpd`/`m4a`/`m4v` и т.п.);
 - `-d, --debug` — подробный отладочный вывод;
 - `--lang` — язык UI-сообщений (`ru`, `en` и т.п.).
+
+Языки (как в vot.js):
+
+- `--request-lang`: `auto` (или пусто), `ru`, `en`, `zh`, `ko`, `lt`, `lv`, `ar`, `fr`, `it`, `es`, `de`, `ja`;
+- `--response-lang`: `ru`, `en`, `kk`.
 
 Опции `translate`, связанные с прокси:
 
@@ -131,6 +137,7 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
   "yandex_hmac_key": "bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf",
   "yandex_token": "ya-oauth-token-for-lively-voice-if-needed",
   "worker_url": "https://vot-worker.toil.cc",
+  "vot_host": "https://vot.toil.cc/v1",
   "default_response_lang": "ru",
   "use_yt_dlp": true,
   "yt_dlp_use_direct_url": true,
@@ -163,6 +170,7 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
 - `yandex_hmac_key` — ключ для HMAC-подписи `Sec-*` заголовков (по умолчанию прошит в бинарник);
 - `yandex_token` — OAuth-токен Яндекса, используемый для живых голосов (Lively Voice), если задан;
 - `worker_url` — базовый URL worker backend’а (только схема + host, без path/query/fragment), если нужно использовать не `https://vot-worker.toil.cc`, а другой адрес;
+- `vot_host` — базовый URL vot-backend (схема + host + опциональный path вроде `/v1`); по умолчанию `https://vot.toil.cc/v1`;
 - `default_response_lang` — язык перевода по умолчанию, если флаг `--response-lang` не указан (по умолчанию `ru` в бинарнике; это поле позволяет сменить его, не меняя CLI-аргументы);
 - `use_yt_dlp` — при `true` CLI может использовать локально установленный `yt-dlp` (если он найден в `PATH`) для получения прямых медиассылок/метаданных;
 - `yt_dlp_use_direct_url` — при `true` backends получают уже «распакованный» прямой URL от `yt-dlp`, при `false` — исходный URL (напр. страница YouTube);
@@ -186,7 +194,8 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
 - `VOT_YANDEX_HMAC_KEY` → `yandex_hmac_key`;
 - `VOT_YANDEX_TOKEN` → `yandex_token`;
 - `VOT_WORKER_URL` → `worker_url`;
-- `VOT_PROXY` → `proxy`.
+- `VOT_PROXY` → `proxy`;
+- `VOT_HOST` → `vot_host`.
 
 Пример:
 
@@ -261,6 +270,19 @@ vot translate --response-lang=ru "https://youtu.be/..."
 ```
 
 Код выхода: `0`, если ни один URL не завершился ошибкой; иначе `1`. При `--json` вместе с `--silent` ошибки не дублируются в stderr (остаются только в JSON).
+
+## vot-backend (custom media)
+
+Ссылки на HLS/DASH/аудио-контейнеры (`m3u8`, `mpd`, `m4a`, `m4v`) и некоторые CDN (например Epic Games) Яндекс часто не принимает напрямую. Для них CLI автоматически ходит в [vot-backend](https://github.com/FOSWLY/vot-backend):
+
+```bash
+vot translate --response-lang=ru "https://example.com/stream/index.m3u8"
+vot translate --vot-host=https://vot.example.com/v1 --response-lang=ru "https://example.com/a.mpd"
+```
+
+Адрес задаётся через `--vot-host`, `vot_host` в конфиге или `VOT_HOST`. Path `/v1` допустим (в отличие от `worker_url`).
+
+Для обычных страниц (YouTube и т.п.) по-прежнему используются `direct` / `worker`. Флаги `--direct-url` / `--subs-url` теперь также прокидываются в **worker** через `TranslationHelp`.
 
 ## Прокси
 

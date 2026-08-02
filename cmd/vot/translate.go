@@ -17,6 +17,7 @@ import (
 
 	"github.com/netnomadd/vot-cli-go/internal/backend"
 	"github.com/netnomadd/vot-cli-go/internal/config"
+	"github.com/netnomadd/vot-cli-go/internal/langs"
 	"github.com/netnomadd/vot-cli-go/internal/proxyutil"
 	"github.com/netnomadd/vot-cli-go/internal/yandexclient"
 )
@@ -36,6 +37,7 @@ type messages struct {
 	GlobalOptionsBackend string
 	GlobalOptionsJSON    string
 	GlobalOptionsProxy   string
+	GlobalOptionsVotHost string
 	HelpHint             string
 
 	// Translate command
@@ -70,6 +72,7 @@ type messages struct {
 	OutfileNeedsSingleURL            string
 	OutfileMustBeBareName            string
 	InvalidProxyFmt                  string
+	InvalidVotHostFmt                string
 	InvalidSubsFormatFmt             string
 	SubsRequireDirect                string
 	NoSubtitlesFound                 string
@@ -152,6 +155,7 @@ func getMessages() messages {
 			GlobalOptionsBackend: "backend для перевода: direct или worker",
 			GlobalOptionsJSON:    "вывести итог в stdout как JSON (без прогресса; перекрывает --silent)",
 			GlobalOptionsProxy:   "HTTP(S) прокси: [http://][user:pass@]host:port (Yandex/worker, скачивание; yt-dlp — см. --proxy-yt-dlp)",
+			GlobalOptionsVotHost: "базовый URL vot-backend (по умолчанию https://vot.toil.cc/v1; для custom/m3u8/mpd)",
 			HelpHint:             "запустите 'vot <команда> --help' для справки по опциям команды",
 
 			UsageTranslate:                   "использование: vot translate [опции] <url> [url2 ...]",
@@ -185,8 +189,9 @@ func getMessages() messages {
 			OutfileNeedsSingleURL:            "--outfile можно использовать только с одним URL",
 			OutfileMustBeBareName:            "--outfile должен быть именем файла без пути",
 			InvalidProxyFmt:                  "некорректный --proxy %q: %v",
+			InvalidVotHostFmt:                "некорректный --vot-host %q: %v",
 			InvalidSubsFormatFmt:             "%v",
-			SubsRequireDirect:                "--subs поддерживается только с --backend=direct",
+			SubsRequireDirect:                "--subs поддерживается только с --backend=direct (или автоматически через vot-backend для custom-ссылок)",
 			NoSubtitlesFound:                 "субтитры не найдены",
 			NoSubtitlesForLangFmt:            "нет субтитров для языка %q",
 			SubtitlesWaiting:                 "субтитры ещё готовятся (waiting=true)",
@@ -238,6 +243,7 @@ func getMessages() messages {
 			GlobalOptionsBackend: "backend to use: direct or worker",
 			GlobalOptionsJSON:    "write final result to stdout as JSON (no progress; overrides --silent)",
 			GlobalOptionsProxy:   "HTTP(S) proxy: [http://][user:pass@]host:port (Yandex/worker, download; yt-dlp via --proxy-yt-dlp)",
+			GlobalOptionsVotHost: "vot-backend base URL (default https://vot.toil.cc/v1; used for custom/m3u8/mpd links)",
 			HelpHint:             "run 'vot <command> --help' for command-specific options",
 
 			UsageTranslate:                   "usage: vot translate [options] <url> [url2 ...]",
@@ -271,8 +277,9 @@ func getMessages() messages {
 			OutfileNeedsSingleURL:            "--outfile can only be used with a single URL",
 			OutfileMustBeBareName:            "--outfile must be a bare file name, not a path",
 			InvalidProxyFmt:                  "invalid --proxy %q: %v",
+			InvalidVotHostFmt:                "invalid --vot-host %q: %v",
 			InvalidSubsFormatFmt:             "%v",
-			SubsRequireDirect:                "--subs requires --backend=direct",
+			SubsRequireDirect:                "--subs requires --backend=direct (or vot-backend automatically for custom links)",
 			NoSubtitlesFound:                 "no subtitles found",
 			NoSubtitlesForLangFmt:            "no subtitles for language %q",
 			SubtitlesWaiting:                 "subtitles are still preparing (waiting=true)",
@@ -460,6 +467,9 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		if os.Getenv("VOT_PROXY") != "" {
 			fmt.Fprintln(os.Stderr, "[debug] using proxy from VOT_PROXY")
 		}
+		if os.Getenv("VOT_HOST") != "" {
+			fmt.Fprintln(os.Stderr, "[debug] using vot-host from VOT_HOST")
+		}
 	}
 
 	// Effective proxy: explicit --proxy wins over config/env.
@@ -491,6 +501,20 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			flagRespLang = cfg.DefaultResponseLang
 		}
 	}
+
+	if err := langs.ValidateRequestLang(flagReqLang); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", msg.ErrorPrefix, err)
+		os.Exit(1)
+	}
+	if err := langs.ValidateResponseLang(flagRespLang); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", msg.ErrorPrefix, err)
+		os.Exit(1)
+	}
+	flagReqLang = langs.NormalizeLang(flagReqLang)
+	if flagReqLang == "auto" {
+		flagReqLang = ""
+	}
+	flagRespLang = langs.NormalizeLang(flagRespLang)
 
 	// Effective yt-dlp settings: config provides defaults, CLI flags can override.
 	useYtDLP := cfg != nil && cfg.UseYtDLP
@@ -563,6 +587,11 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	// Prepare backend clients; per-URL rules may choose between them.
 	directClient := yandexclient.NewDirectClient()
 	workerClient := yandexclient.NewWorkerClient()
+	votBackendClient := yandexclient.NewVOTBackendClient()
+	effectiveVotHost := configuredVOTHost(cfg)
+	if f := fs.Lookup("vot-host"); f != nil && f.Changed {
+		effectiveVotHost = flagVotHost
+	}
 	if cfg != nil {
 		directClient.SetUserAgent(cfg.UserAgent)
 		directClient.SetHMACKey(cfg.YandexHMACKey)
@@ -575,6 +604,11 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidWorkerURLFmt+"\n", msg.ErrorPrefix, cfg.WorkerURL, err)
 			os.Exit(1)
 		}
+		votBackendClient.SetUserAgent(cfg.UserAgent)
+	}
+	if err := votBackendClient.SetVOTHost(effectiveVotHost); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidVotHostFmt+"\n", msg.ErrorPrefix, effectiveVotHost, err)
+		os.Exit(1)
 	}
 	if err := directClient.SetHTTPProxy(effectiveProxy); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidProxyFmt+"\n", msg.ErrorPrefix, effectiveProxy, err)
@@ -584,8 +618,15 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidProxyFmt+"\n", msg.ErrorPrefix, effectiveProxy, err)
 		os.Exit(1)
 	}
+	if err := votBackendClient.SetHTTPProxy(effectiveProxy); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidProxyFmt+"\n", msg.ErrorPrefix, effectiveProxy, err)
+		os.Exit(1)
+	}
 	if flagDebug && !flagSilent && effectiveProxy != "" {
 		fmt.Fprintf(os.Stderr, "[debug] using HTTP proxy %s (yt-dlp proxy=%v)\n", effectiveProxy, flagProxyYtDLP)
+	}
+	if flagDebug && !flagSilent {
+		fmt.Fprintf(os.Stderr, "[debug] vot-host=%s\n", effectiveVotHost)
 	}
 
 	quietStderr := flagSilent || useJSON
@@ -637,6 +678,18 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		effectiveVoiceStyle = applySourceVoiceStyle(u, sourceRules, effectiveVoiceStyle, voiceStyleFlagChanged)
 		cookies, cookiesFromBrowser := applySourceYtDLPCookies(u, sourceRules, ytDLPCookies, ytDLPCookiesFromBrowser, ytDLPCookiesFlagChanged, ytDLPCookiesFromBrowserFlagChanged)
 		effectiveURL = applySourceURLRewrites(effectiveURL, sourceRules)
+		effectiveReqLang = langs.NormalizeLang(effectiveReqLang)
+		if effectiveReqLang == "auto" {
+			effectiveReqLang = ""
+		}
+		if err := langs.ValidateRequestLang(effectiveReqLang); err != nil {
+			if !useJSON || !flagSilent {
+				fmt.Fprintf(os.Stderr, "%s: %s: %v\n", msg.ErrorPrefix, u, err)
+			}
+			cancel()
+			failItem(err.Error())
+			continue
+		}
 		if normalized := normalizeYtDLPCookiesPath(cookies); normalized == "" && cookies != "" {
 			if !quietStderr {
 				fmt.Fprintf(os.Stderr, "[warn] yt-dlp cookies path %q is unusable (parent dir missing); ignoring --cookies for this URL\n", cookies)
@@ -720,7 +773,16 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			continue
 		}
 
-		if flagSubs {
+		useVOTBackend := yandexclient.IsCustomLink(effectiveURL)
+		if useVOTBackend {
+			effectiveBackend = "vot"
+			client = votBackendClient
+			if flagDebug && !quietStderr {
+				fmt.Fprintf(os.Stderr, "[debug] custom media URL detected; using vot-backend %s\n", effectiveVotHost)
+			}
+		}
+
+		if flagSubs && !useVOTBackend {
 			if backendFlagChanged && effectiveBackend == "worker" {
 				if !useJSON || !flagSilent {
 					fmt.Fprintf(os.Stderr, "%s: %s\n", msg.ErrorPrefix, msg.SubsRequireDirect)
@@ -729,7 +791,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 				failItem(msg.SubsRequireDirect)
 				continue
 			}
-			// Subtitles API is implemented for the direct Yandex client only.
+			// Subtitles API for normal pages is implemented on the direct client.
 			effectiveBackend = "direct"
 			client = directClient
 		}
@@ -778,7 +840,15 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		}
 
 		if flagSubs {
-			subsRes, err := directClient.GetSubtitles(ctx, effectiveURL, effectiveReqLang)
+			var (
+				subsRes yandexclient.GetSubtitlesResult
+				err     error
+			)
+			if useVOTBackend {
+				subsRes, err = votBackendClient.GetSubtitles(ctx, effectiveURL)
+			} else {
+				subsRes, err = directClient.GetSubtitles(ctx, effectiveURL, effectiveReqLang)
+			}
 			cancel()
 			if err != nil {
 				errText := err.Error()

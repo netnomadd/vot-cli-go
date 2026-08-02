@@ -27,6 +27,16 @@ func applyConfigEnvOverrides(cfg *config.Config) {
 	if proxy := os.Getenv("VOT_PROXY"); proxy != "" {
 		cfg.Proxy = proxy
 	}
+	if votHost := os.Getenv("VOT_HOST"); votHost != "" {
+		cfg.VotHost = votHost
+	}
+}
+
+func configuredVOTHost(cfg *config.Config) string {
+	if cfg != nil && cfg.VotHost != "" {
+		return cfg.VotHost
+	}
+	return yandexclient.DefaultVOTHostURL()
 }
 
 func configuredWorkerURL(cfg *config.Config) string {

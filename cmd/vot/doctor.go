@@ -69,6 +69,7 @@ func doctorMain(parent *flag.FlagSet, args []string) {
 	printEnvStatus("VOT_YANDEX_TOKEN")
 	printEnvStatus("VOT_WORKER_URL")
 	printEnvStatus("VOT_PROXY")
+	printEnvStatus("VOT_HOST")
 	printEnvStatus("VOT_LANG")
 
 	proxy := ""
@@ -86,6 +87,16 @@ func doctorMain(parent *flag.FlagSet, args []string) {
 		}
 	} else {
 		fmt.Fprintln(os.Stderr, "  proxy: not set")
+	}
+
+	votHost := configuredVOTHost(cfg)
+	if f := fs.Lookup("vot-host"); f != nil && f.Changed {
+		votHost = flagVotHost
+	}
+	if schema, host, err := yandexclient.NormalizeVOTHost(votHost); err != nil {
+		fmt.Fprintf(os.Stderr, "  vot-host: invalid %q: %v\n", votHost, err)
+	} else {
+		fmt.Fprintf(os.Stderr, "  vot-host: %s://%s\n", schema, host)
 	}
 
 	fmt.Fprintln(os.Stderr, "")
