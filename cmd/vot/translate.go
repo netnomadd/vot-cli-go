@@ -61,6 +61,8 @@ type messages struct {
 	FlagNoTitleHelp                  string
 	FlagKeepURLHelp                  string
 	FlagProxyYtDLPHelp               string
+	FlagSubsHelp                     string
+	FlagSubsFormatHelp               string
 	RespLangRequired                 string
 	InvalidVoiceStyle                string
 	PollIntervalTooSmall             string
@@ -68,6 +70,11 @@ type messages struct {
 	OutfileNeedsSingleURL            string
 	OutfileMustBeBareName            string
 	InvalidProxyFmt                  string
+	InvalidSubsFormatFmt             string
+	SubsRequireDirect                string
+	NoSubtitlesFound                 string
+	NoSubtitlesForLangFmt            string
+	SubtitlesWaiting                 string
 	FailedLoadConfigFmt              string
 	InvalidWorkerURLFmt              string
 	UnknownBackendFmt                string
@@ -169,6 +176,8 @@ func getMessages() messages {
 			FlagNoTitleHelp:                  "в имени файла использовать videoId/hash, не title из yt-dlp",
 			FlagKeepURLHelp:                  "при скачивании дополнительно печатать URL (plain: path<TAB>url; в --json оба поля всегда)",
 			FlagProxyYtDLPHelp:               "передавать --proxy в yt-dlp (по умолчанию включено, если задан прокси)",
+			FlagSubsHelp:                     "получить субтитры вместо аудио (только --backend=direct)",
+			FlagSubsFormatHelp:               "формат субтитров: srt (по умолчанию), vtt или json",
 			RespLangRequired:                 "--response-lang обязателен",
 			InvalidVoiceStyle:                "--voice-style может быть только 'live' или 'tts'",
 			PollIntervalTooSmall:             "--poll-interval должен быть 0 (auto) или не менее 30 секунд",
@@ -176,6 +185,11 @@ func getMessages() messages {
 			OutfileNeedsSingleURL:            "--outfile можно использовать только с одним URL",
 			OutfileMustBeBareName:            "--outfile должен быть именем файла без пути",
 			InvalidProxyFmt:                  "некорректный --proxy %q: %v",
+			InvalidSubsFormatFmt:             "%v",
+			SubsRequireDirect:                "--subs поддерживается только с --backend=direct",
+			NoSubtitlesFound:                 "субтитры не найдены",
+			NoSubtitlesForLangFmt:            "нет субтитров для языка %q",
+			SubtitlesWaiting:                 "субтитры ещё готовятся (waiting=true)",
 			FailedLoadConfigFmt:              "не удалось загрузить конфиг: %v",
 			InvalidWorkerURLFmt:              "некорректный worker URL %q: %v",
 			UnknownBackendFmt:                "неизвестный backend '%s' (ожидается 'direct' или 'worker')",
@@ -248,6 +262,8 @@ func getMessages() messages {
 			FlagNoTitleHelp:                  "use videoId/hash in file name instead of yt-dlp title",
 			FlagKeepURLHelp:                  "when downloading, also print the audio URL (plain: path<TAB>url; always both fields with --json)",
 			FlagProxyYtDLPHelp:               "pass --proxy to yt-dlp (enabled by default when a proxy is set)",
+			FlagSubsHelp:                     "fetch subtitles instead of audio (requires --backend=direct)",
+			FlagSubsFormatHelp:               "subtitle format: srt (default), vtt, or json",
 			RespLangRequired:                 "--response-lang is required",
 			InvalidVoiceStyle:                "--voice-style must be 'live' or 'tts'",
 			PollIntervalTooSmall:             "--poll-interval must be 0 (auto) or at least 30 seconds",
@@ -255,6 +271,11 @@ func getMessages() messages {
 			OutfileNeedsSingleURL:            "--outfile can only be used with a single URL",
 			OutfileMustBeBareName:            "--outfile must be a bare file name, not a path",
 			InvalidProxyFmt:                  "invalid --proxy %q: %v",
+			InvalidSubsFormatFmt:             "%v",
+			SubsRequireDirect:                "--subs requires --backend=direct",
+			NoSubtitlesFound:                 "no subtitles found",
+			NoSubtitlesForLangFmt:            "no subtitles for language %q",
+			SubtitlesWaiting:                 "subtitles are still preparing (waiting=true)",
 			FailedLoadConfigFmt:              "failed to load config: %v",
 			InvalidWorkerURLFmt:              "invalid worker URL %q: %v",
 			UnknownBackendFmt:                "unknown backend '%s' (expected 'direct' or 'worker')",
@@ -331,6 +352,8 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		flagNoTitle                  bool
 		flagKeepURL                  bool
 		flagProxyYtDLP               bool
+		flagSubs                     bool
+		flagSubsFormat               string
 	)
 	pollIntervalFlagChanged := false
 
@@ -354,6 +377,8 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	fs.BoolVar(&flagNoTitle, "no-title", false, msg.FlagNoTitleHelp)
 	fs.BoolVar(&flagKeepURL, "keep-url", false, msg.FlagKeepURLHelp)
 	fs.BoolVar(&flagProxyYtDLP, "proxy-yt-dlp", true, msg.FlagProxyYtDLPHelp)
+	fs.BoolVar(&flagSubs, "subs", false, msg.FlagSubsHelp)
+	fs.StringVar(&flagSubsFormat, "subs-format", "srt", msg.FlagSubsFormatHelp)
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -391,6 +416,18 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	wantDownload := flagOutdir != "" || flagOutfile != ""
 	// --json wins over --silent for stdout formatting.
 	useJSON := flagJSON
+	subsFormat := "srt"
+	if flagSubs {
+		normalized, err := validateSubsFormat(flagSubsFormat)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidSubsFormatFmt+"\n", msg.ErrorPrefix, err)
+			os.Exit(1)
+		}
+		subsFormat = normalized
+	} else if f := fs.Lookup("subs-format"); f != nil && f.Changed {
+		fmt.Fprintf(os.Stderr, "%s: --subs-format requires --subs\n", msg.ErrorPrefix)
+		os.Exit(1)
+	}
 	if f := fs.Lookup("poll-interval"); f != nil && f.Changed {
 		pollIntervalFlagChanged = true
 	}
@@ -554,6 +591,10 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	quietStderr := flagSilent || useJSON
 	exitCode := 0
 	var jsonResults []translateItemResult
+	resultType := "audio"
+	if flagSubs {
+		resultType = "subtitles"
+	}
 
 	for _, u := range urls {
 		pollTimeout := flagMaxWait
@@ -570,17 +611,22 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		failItem := func(errText string) {
 			exitCode = 1
 			if useJSON {
-				jsonResults = append(jsonResults, translateItemResult{
+				item := translateItemResult{
 					Input:      u,
 					Status:     "failed",
-					Type:       "audio",
+					Type:       resultType,
 					VideoID:    strPtr(videoID),
 					URL:        nil,
 					OutputPath: nil,
 					Error:      strPtr(errText),
 					Backend:    effectiveBackend,
 					VoiceStyle: effectiveVoiceStyle,
-				})
+				}
+				if flagSubs {
+					item.SubsFormat = subsFormat
+					item.VoiceStyle = ""
+				}
+				jsonResults = append(jsonResults, item)
 			}
 		}
 
@@ -674,6 +720,20 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			continue
 		}
 
+		if flagSubs {
+			if backendFlagChanged && effectiveBackend == "worker" {
+				if !useJSON || !flagSilent {
+					fmt.Fprintf(os.Stderr, "%s: %s\n", msg.ErrorPrefix, msg.SubsRequireDirect)
+				}
+				cancel()
+				failItem(msg.SubsRequireDirect)
+				continue
+			}
+			// Subtitles API is implemented for the direct Yandex client only.
+			effectiveBackend = "direct"
+			client = directClient
+		}
+
 		matchedRules := matchedSourceRuleSummaries(u, sourceRules)
 		matchedSummary := "-"
 		if len(matchedRules) > 0 {
@@ -699,16 +759,111 @@ func translateMain(parent *flag.FlagSet, args []string) {
 					u, effectiveURL, sourceKind, effectiveBackend, effectiveReqLang, flagRespLang, directForBackend, effectiveVoiceStyle, flagSubsURL, pollMode, flagPollInterval, flagPollAttempts, useYtDLPForURL, ytDLPUseDirectURLForURL, cookies, cookiesFromBrowser, matchedSummary)
 			}
 			if useJSON {
-				jsonResults = append(jsonResults, translateItemResult{
-					Input:      u,
-					Status:     "explained",
-					Type:       "audio",
-					VideoID:    strPtr(videoID),
-					Backend:    effectiveBackend,
-					VoiceStyle: effectiveVoiceStyle,
-				})
+				item := translateItemResult{
+					Input:   u,
+					Status:  "explained",
+					Type:    resultType,
+					VideoID: strPtr(videoID),
+					Backend: effectiveBackend,
+				}
+				if flagSubs {
+					item.SubsFormat = subsFormat
+				} else {
+					item.VoiceStyle = effectiveVoiceStyle
+				}
+				jsonResults = append(jsonResults, item)
 			}
 			cancel()
+			continue
+		}
+
+		if flagSubs {
+			subsRes, err := directClient.GetSubtitles(ctx, effectiveURL, effectiveReqLang)
+			cancel()
+			if err != nil {
+				errText := err.Error()
+				if !useJSON || !flagSilent {
+					fmt.Fprintf(os.Stderr, "%s: %s: %s\n", msg.ErrorPrefix, u, errText)
+				}
+				failItem(errText)
+				continue
+			}
+			if len(subsRes.Subtitles) == 0 {
+				errText := msg.NoSubtitlesFound
+				if subsRes.Waiting {
+					errText = msg.SubtitlesWaiting
+				}
+				if !useJSON || !flagSilent {
+					fmt.Fprintf(os.Stderr, "%s: %s: %s\n", msg.ErrorPrefix, u, errText)
+				}
+				failItem(errText)
+				continue
+			}
+			subsURL, ok := yandexclient.PickSubtitleURL(subsRes.Subtitles, flagRespLang)
+			if !ok {
+				errText := fmt.Sprintf(msg.NoSubtitlesForLangFmt, flagRespLang)
+				if !useJSON || !flagSilent {
+					fmt.Fprintf(os.Stderr, "%s: %s: %s\n", msg.ErrorPrefix, u, errText)
+				}
+				failItem(errText)
+				continue
+			}
+
+			outputPath := ""
+			if wantDownload {
+				title := ""
+				if !flagNoTitle {
+					if t, titleErr := getVideoTitleWithYtDLP(u, cookies, cookiesFromBrowser, ytDLPProxy); titleErr != nil {
+						if flagDebug && !quietStderr {
+							fmt.Fprintf(os.Stderr, "[debug] yt-dlp title lookup failed for %s: %v\n", u, titleErr)
+						}
+					} else {
+						title = t
+					}
+				}
+				dest, destErr := resolveSubsOutputPath(flagOutdir, flagOutfile, u, title, subsFormat, flagNoTitle)
+				if destErr != nil {
+					errText := destErr.Error()
+					if strings.Contains(errText, "bare file name") {
+						errText = msg.OutfileMustBeBareName
+					}
+					if !useJSON || !flagSilent {
+						fmt.Fprintf(os.Stderr, "%s: %s\n", msg.ErrorPrefix, errText)
+					}
+					failItem(errText)
+					continue
+				}
+				dlCtx, dlCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				dlErr := downloadSubtitleFile(dlCtx, subsURL, dest, subsFormat, effectiveProxy)
+				dlCancel()
+				if dlErr != nil {
+					errText := fmt.Sprintf(msg.DownloadFailedFmt, u, dlErr)
+					if !useJSON || !flagSilent {
+						fmt.Fprintf(os.Stderr, "%s: %s\n", msg.ErrorPrefix, errText)
+					}
+					failItem(errText)
+					continue
+				}
+				outputPath = dest
+				if flagDebug && !quietStderr {
+					fmt.Fprintf(os.Stderr, "[debug] saved subtitles to %s\n", outputPath)
+				}
+			}
+
+			if useJSON {
+				jsonResults = append(jsonResults, translateItemResult{
+					Input:      u,
+					Status:     "success",
+					Type:       "subtitles",
+					VideoID:    strPtr(videoID),
+					URL:        strPtr(subsURL),
+					OutputPath: strPtr(outputPath),
+					Backend:    effectiveBackend,
+					SubsFormat: subsFormat,
+				})
+			} else {
+				emitPlainTranslateLine(os.Stdout, subsURL, outputPath, flagKeepURL)
+			}
 			continue
 		}
 

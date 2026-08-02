@@ -88,6 +88,8 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
 - `--outfile` — имя выходного файла (только для одного URL; иначе имя строится из title/`videoId`);
 - `--no-title` — в имени файла использовать `videoId`/hash, не title из `yt-dlp`;
 - `--keep-url` — при скачивании дополнительно печатать URL аудио (plain: `path<TAB>url`; в `--json` оба поля есть всегда);
+- `--subs` — получить субтитры вместо аудио (только `--backend=direct`);
+- `--subs-format` — формат субтитров: `srt` (по умолчанию), `vtt` или `json` (имеет смысл с `--outdir`/`--outfile`; без скачивания печатается URL);
 - `--backend` — `direct` или `worker`;
 - `--poll-interval` — интервал между запросами статуса: `0` (по умолчанию) = авто-режим по `remainingTime` из backend, `>=30` = фиксированный интервал в секундах;
 - `--poll-attempts` — максимальное количество попыток опроса (`0` по умолчанию = без лимита попыток, до истечения `--max-wait`);
@@ -274,6 +276,21 @@ vot translate --response-lang=ru "https://youtu.be/..."
 vot translate --proxy=http://127.0.0.1:7890 --response-lang=ru "https://youtu.be/..."
 vot translate --proxy=http://user:pass@proxy.example:8080 --proxy-yt-dlp=false "https://youtu.be/..."
 ```
+
+## Субтитры
+
+Режим `--subs` запрашивает субтитры у Яндекса (`/video-subtitles/get-subtitles`) через **direct** backend и выбирает дорожку под `--response-lang` (сначала перевод, затем оригинал).
+
+```bash
+# только URL субтитров
+vot translate --backend=direct --subs --response-lang=ru "https://youtu.be/..."
+
+# скачать и сконвертировать в SRT/VTT/JSON
+vot translate --backend=direct --subs --subs-format=srt -o ./out --no-title "https://youtu.be/..."
+vot --json translate --backend=direct --subs --subs-format=vtt -o ./out "https://youtu.be/..."
+```
+
+Без `--outdir`/`--outfile` поведение как у аудио: в stdout печатается URL. Worker backend для `--subs` пока не поддерживается.
 
 ## Скачивание аудио
 

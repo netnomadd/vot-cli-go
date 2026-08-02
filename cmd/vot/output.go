@@ -18,6 +18,7 @@ type translateItemResult struct {
 	DetectedLang string  `json:"detectedLang,omitempty"`
 	Backend      string  `json:"backend,omitempty"`
 	VoiceStyle   string  `json:"voiceStyle,omitempty"`
+	SubsFormat   string  `json:"subsFormat,omitempty"`
 }
 
 type translateSummary struct {
