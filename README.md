@@ -69,6 +69,12 @@ vot --backend=worker translate --response-lang=ru "https://youtu.be/..."
 
 # переключить стиль голоса: tts вместо live
 vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
+
+# скачать переведённое аудио в каталог (без -o/--outdir печатается только URL)
+vot translate -o ./out --response-lang=ru "https://youtu.be/..."
+
+# машинный JSON-итог (удобно для скриптов)
+vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
 ```
 
 Ключевые опции `translate`:
@@ -78,6 +84,10 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
 - `--voice-style` — `live` (по умолчанию, живые голоса) или `tts` (классический TTS);
 - `--direct-url` — считать входные URL прямыми ссылками на медиа (mp4/webm);
 - `--subs-url` — прямая ссылка на субтитры, которые передаются как подсказка для перевода;
+- `-o, --outdir` — каталог для сохранения переведённого аудио; без флага CLI по-прежнему печатает только URL;
+- `--outfile` — имя выходного файла (только для одного URL; иначе имя строится из title/`videoId`);
+- `--no-title` — в имени файла использовать `videoId`/hash, не title из `yt-dlp`;
+- `--keep-url` — при скачивании дополнительно печатать URL аудио (plain: `path<TAB>url`; в `--json` оба поля есть всегда);
 - `--backend` — `direct` или `worker`;
 - `--poll-interval` — интервал между запросами статуса: `0` (по умолчанию) = авто-режим по `remainingTime` из backend, `>=30` = фиксированный интервал в секундах;
 - `--poll-attempts` — максимальное количество попыток опроса (`0` по умолчанию = без лимита попыток, до истечения `--max-wait`);
@@ -92,7 +102,8 @@ vot translate --voice-style=tts --response-lang=ru "https://youtu.be/..."
 Флаги верхнего уровня:
 
 - `-c, --config` — путь к конфигурационному файлу;
-- `-q, --silent` — "тихий" режим: в stdout выводятся только итоговые URL, сообщения об ошибках — в stderr;
+- `-q, --silent` — "тихий" режим: в stdout только итог (URL или путь к файлу), сообщения об ошибках — в stderr;
+- `--json` — один JSON-документ с итогами батча в stdout (без прогресса; перекрывает `--silent`);
 - `-d, --debug` — подробный отладочный вывод;
 - `--lang` — язык UI-сообщений (`ru`, `en` и т.п.).
 
@@ -212,7 +223,50 @@ vot translate --response-lang=ru "https://youtu.be/..."
 
 ## Режим `--silent`
 
-При использовании `--silent` утилита печатает **только** итоговые URL аудио-перевода в `stdout`. Все диагностические сообщения и ошибки выводятся в `stderr`, что упрощает дальнейшее машинное парсинг/пайплайнинг вывода.
+При использовании `--silent` утилита печатает в `stdout` только итог: URL аудио либо путь к скачанному файлу (если задан `--outdir`/`--outfile`). Все диагностические сообщения и ошибки уходят в `stderr`.
+
+## Режим `--json`
+
+Флаг `--json` выводит в `stdout` один JSON-документ по всему батчу URL (без строк прогресса). Он удобнее `--silent` для скриптов: есть `ok`, `summary` и массив `results` с полями вроде `input`, `status`, `url`, `outputPath`, `error`.
+
+Пример успешного ответа:
+
+```json
+{
+  "ok": true,
+  "summary": { "total": 1, "success": 1, "failed": 0 },
+  "results": [
+    {
+      "input": "https://www.youtube.com/watch?v=X98VPQCE_WI",
+      "status": "success",
+      "type": "audio",
+      "videoId": "X98VPQCE_WI",
+      "url": "https://example.com/audio.mp3",
+      "outputPath": "/tmp/out/X98VPQCE_WI.mp3",
+      "backend": "worker",
+      "voiceStyle": "live"
+    }
+  ]
+}
+```
+
+Код выхода: `0`, если ни один URL не завершился ошибкой; иначе `1`. При `--json` вместе с `--silent` ошибки не дублируются в stderr (остаются только в JSON).
+
+## Скачивание аудио
+
+По умолчанию CLI только печатает URL готовой дорожки. Чтобы сохранить файл:
+
+- `-o, --outdir=PATH` — каталог назначения (создаётся при необходимости);
+- `--outfile=NAME` — явное имя файла (только при одном входном URL; расширение `.mp3` добавится само, если его нет);
+- `--no-title` — не запрашивать title через `yt-dlp` для имени файла;
+- `--keep-url` — в plain-режиме печатать `путь<TAB>url`.
+
+Имя файла без `--outfile`: title из `yt-dlp` (если доступен и не `--no-title`), иначе `videoId`/короткий hash от URL. При коллизии имён добавляется суффикс `-1`, `-2`, …
+
+```bash
+vot translate -o ./out --no-title --response-lang=ru "https://youtu.be/..."
+vot translate -o ./out --outfile=track.mp3 --response-lang=ru "https://youtu.be/..."
+```
 
 ## Поллинг статуса перевода
 
@@ -248,6 +302,13 @@ vot translate --response-lang=ru "https://youtu.be/...1" "https://youtu.be/...2"
 
 ```bash
 vot --silent translate --response-lang=ru "https://youtu.be/..."  # только URL в stdout
+```
+
+Скачивание и JSON-итог:
+
+```bash
+vot translate -o ./out --no-title --response-lang=ru "https://youtu.be/..."
+vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
 ```
 
 Использование worker backend с конфигом и локализацией UI:

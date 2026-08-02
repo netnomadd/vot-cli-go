@@ -14,6 +14,7 @@ var (
 	flagDebug   bool
 	flagLang    string
 	flagBackend string
+	flagJSON    bool
 )
 
 func printRootUsage(root *flag.FlagSet) {
@@ -37,6 +38,7 @@ func main() {
 	root.BoolVarP(&flagDebug, "debug", "d", false, msg.GlobalOptionsDebug)
 	root.StringVar(&flagLang, "lang", "", msg.GlobalOptionsLang)
 	root.StringVar(&flagBackend, "backend", "direct", msg.GlobalOptionsBackend)
+	root.BoolVar(&flagJSON, "json", false, msg.GlobalOptionsJSON)
 
 	root.Usage = func() { printRootUsage(root) }
 
