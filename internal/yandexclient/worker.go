@@ -22,7 +22,7 @@ import (
 )
 
 // WorkerClient implements backend.Client and talks to the VOT worker backend
-// (e.g. vot-worker.toil.cc), which in turn proxies requests to Yandex.
+// (e.g. vot-worker.eu.cc), which in turn proxies requests to Yandex.
 //
 // The protobuf payloads and headers are the same as in DirectClient, but
 // wrapped into a JSON structure understood by the worker service.

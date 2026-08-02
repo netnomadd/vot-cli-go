@@ -8,7 +8,7 @@
 Кроссплатформенная CLI-утилита на Go для перевода озвучки видео через сервисы Яндекса / FOSWLY. Поддерживаются два backend’а:
 
 - **direct** — прямые запросы к `api.browser.yandex.ru` (динамический protobuf, HMAC-подпись заголовков);
-- **worker** — запросы к worker-сервису (по умолчанию `https://vot-worker.toil.cc`, адрес можно переопределить в конфиге или через окружение), который проксирует обращение к Яндексу.
+- **worker** — запросы к worker-сервису (по умолчанию `https://vot-worker.eu.cc`, адрес можно переопределить в конфиге или через окружение), который проксирует обращение к Яндексу.
 
 ## Установка и сборка
 
@@ -136,7 +136,7 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
   "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... YaBrowser/25.4.0.0 Safari/537.36",
   "yandex_hmac_key": "bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf",
   "yandex_token": "ya-oauth-token-for-lively-voice-if-needed",
-  "worker_url": "https://vot-worker.toil.cc",
+  "worker_url": "https://vot-worker.eu.cc",
   "vot_host": "https://vot.toil.cc/v1",
   "default_response_lang": "ru",
   "use_yt_dlp": true,
@@ -169,7 +169,7 @@ vot --json translate -o ./out --response-lang=ru "https://youtu.be/..."
 - `user_agent` — User-Agent, который будет использован в запросах к Яндексу/worker’у;
 - `yandex_hmac_key` — ключ для HMAC-подписи `Sec-*` заголовков (по умолчанию прошит в бинарник);
 - `yandex_token` — OAuth-токен Яндекса, используемый для живых голосов (Lively Voice), если задан;
-- `worker_url` — базовый URL worker backend’а (только схема + host, без path/query/fragment), если нужно использовать не `https://vot-worker.toil.cc`, а другой адрес;
+- `worker_url` — базовый URL worker backend’а (только схема + host, без path/query/fragment), если нужно использовать не `https://vot-worker.eu.cc`, а другой адрес;
 - `vot_host` — базовый URL vot-backend (схема + host + опциональный path вроде `/v1`); по умолчанию `https://vot.toil.cc/v1`;
 - `default_response_lang` — язык перевода по умолчанию, если флаг `--response-lang` не указан (по умолчанию `ru` в бинарнике; это поле позволяет сменить его, не меняя CLI-аргументы);
 - `use_yt_dlp` — при `true` CLI может использовать локально установленный `yt-dlp` (если он найден в `PATH`) для получения прямых медиассылок/метаданных;
@@ -223,7 +223,7 @@ vot translate --response-lang=ru "https://youtu.be/..."
 - меньше внешних зависимостей (нет дополнительного сервиса), но больше «ломается» при изменениях API Яндекса и может чаще упираться в лимиты/блокировки.
 
 **worker**:
-- утилита общается с worker-сервисом (по умолчанию `https://vot-worker.toil.cc`) по HTTP+JSON;
+- утилита общается с worker-сервисом (по умолчанию `https://vot-worker.eu.cc`) по HTTP+JSON;
 - protobuf-пакеты и `Sec-*` заголовки формируются уже на стороне worker’а, CLI передаёт только параметры (URL, языки, стиль голоса и т.п.);
 - `user_agent` и `yandex_hmac_key` по-прежнему используются для генерации заголовков, но детали протокола с Яндексом инкапсулированы в worker’е;
 - удобен, если не хочется следить за изменениями API Яндекса: интерфейс CLI остаётся стабильным, а обновления логики происходят на стороне worker-сервиса.

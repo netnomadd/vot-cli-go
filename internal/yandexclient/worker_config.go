@@ -8,7 +8,7 @@ import (
 
 const (
 	defaultWorkerSchema = "https"
-	defaultWorkerHost   = "vot-worker.toil.cc"
+	defaultWorkerHost   = "vot-worker.eu.cc"
 )
 
 func DefaultWorkerURL() string {
