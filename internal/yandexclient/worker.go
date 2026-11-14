@@ -106,8 +106,10 @@ func (c *WorkerClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		secHeaders:    c.secYaHeaders,
 		sendTranslate: c.doWorkerProtoRequest,
 		applyAudioFix: func(ctx context.Context, sess *clientSession, videoURL, translationID, fileID string, audio []byte, chunked bool, chunkLen int) error {
-			if err := c.requestVtransFailAudio(ctx, videoURL); err != nil {
-				return fmt.Errorf("at fail-audio-js: %w", err)
+			if len(audio) == 0 {
+				if err := c.requestVtransFailAudio(ctx, videoURL); err != nil {
+					return fmt.Errorf("at fail-audio-js: %w", err)
+				}
 			}
 			if err := c.requestVtransAudio(ctx, sess, videoURL, translationID, fileID, audio, chunked, chunkLen); err != nil {
 				return fmt.Errorf("at audio upload: %w", err)
@@ -173,9 +175,11 @@ func (c *WorkerClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 			}
 			path := "/video-translation/audio"
 			headers := c.secYaHeaders("Vtrans", sess, body, path)
+			last := part == totalParts-1
 			var uploadErr error
 			for uploadAttempt := 1; uploadAttempt <= maxUploadAttempts; uploadAttempt++ {
-				if _, err := c.doWorkerProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
+				resBody, err := c.doWorkerProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers)
+				if err != nil {
 					uploadErr = err
 					if uploadAttempt < maxUploadAttempts && isTransientAudioUploadError(err) {
 						backoff := time.Duration(uploadAttempt) * time.Second
@@ -186,6 +190,10 @@ func (c *WorkerClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 						}
 						continue
 					}
+					break
+				}
+				if err := validateAudioUploadResponse(resBody, last); err != nil {
+					uploadErr = err
 					break
 				}
 				uploadErr = nil
@@ -214,7 +222,8 @@ func (c *WorkerClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 	headers := c.secYaHeaders("Vtrans", sess, body, path)
 	var uploadErr error
 	for uploadAttempt := 1; uploadAttempt <= maxUploadAttempts; uploadAttempt++ {
-		if _, err = c.doWorkerProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
+		resBody, err := c.doWorkerProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers)
+		if err != nil {
 			uploadErr = err
 			if uploadAttempt < maxUploadAttempts && isTransientAudioUploadError(err) {
 				backoff := time.Duration(uploadAttempt) * time.Second
@@ -226,6 +235,12 @@ func (c *WorkerClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 				continue
 			}
 			break
+		}
+		if len(audio) > 0 {
+			if err := validateAudioUploadResponse(resBody, true); err != nil {
+				uploadErr = err
+				break
+			}
 		}
 		uploadErr = nil
 		break
@@ -400,6 +415,9 @@ func (c *WorkerClient) doWorkerProtoRequestWithMethod(ctx context.Context, metho
 		"Content-Type":    "application/x-protobuf",
 		"Pragma":          "no-cache",
 		"Cache-Control":   "no-cache",
+	}
+	for k, v := range browserClientHints() {
+		headers[k] = v
 	}
 	for k, v := range extraHeaders {
 		headers[k] = v

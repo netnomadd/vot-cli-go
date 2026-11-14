@@ -19,6 +19,10 @@ import (
 
 const defaultVideoDurationSec = 343.0
 
+// yandexMinChunkSize is config.minChunkSize from vot.js. Partial audio chunks
+// must be at least this large, except the final chunk.
+const yandexMinChunkSize = 5295308
+
 type pollConfig struct {
 	interval          time.Duration
 	fixedInterval     bool
@@ -83,14 +87,27 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 	cfg := buildPollConfig(p)
 	path := "/video-translation/translate"
 	triedAudioRequestedFix := false
+	// Yandex keys the job by the exact URL string. vot.js sends youtu.be for
+	// both the translate request and the later audio upload.
+	requestURL := p.URL
+	if normalized, ok := youtubeAudioWorkaroundURL(p.URL); ok {
+		requestURL = normalized
+	}
+	if p.Debug && requestURL != p.URL {
+		fmt.Fprintf(os.Stderr, "[debug] [%s] normalized video url to %s\n", opts.backendName, requestURL)
+	}
+	gotTranslateResponse := false
 
 	for attempt := 0; cfg.unlimitedAttempts || attempt < cfg.attempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return backend.TranslateResult{}, err
 		}
 
-		firstRequest := true
-		body, err := opts.encodeRequest(p.URL, dur, p.RequestLang, p.ResponseLang, p, firstRequest)
+		// vot.js defaults this to true on every translate call. Sending false
+		// (the proto3 zero value, so the field is omitted) makes Yandex answer
+		// HTTP 400 on the poll after an audio upload.
+		const firstRequest = true
+		body, err := opts.encodeRequest(requestURL, dur, p.RequestLang, p.ResponseLang, p, firstRequest)
 		if err != nil {
 			return backend.TranslateResult{}, err
 		}
@@ -102,7 +119,10 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 
 		resBytes, err := opts.sendTranslate(ctx, path, body, vtransHeaders)
 		if err != nil {
-			if strings.Contains(err.Error(), "400 Bad Request") && p.DurationSec > 0 && !retriedWithDefaultDuration {
+			// Only the opening request is retried with the fallback duration.
+			// A 400 after Yandex already accepted the video is a different failure,
+			// and replacing a known duration would hide it.
+			if strings.Contains(err.Error(), "400 Bad Request") && p.DurationSec > 0 && !retriedWithDefaultDuration && !gotTranslateResponse {
 				retriedWithDefaultDuration = true
 				dur = defaultVideoDurationSec
 				if p.Debug {
@@ -118,6 +138,7 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 		if err := proto.Unmarshal(resBytes, &resp); err != nil {
 			return backend.TranslateResult{}, err
 		}
+		gotTranslateResponse = true
 
 		status := resp.GetStatus()
 		remaining := resp.GetRemainingTime()
@@ -132,7 +153,9 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 				opts.backendName, attempt+1, total, firstRequest, status, remaining, translationID, shouldRetry)
 		}
 
-		if audioURL := resp.GetUrl(); audioURL != "" {
+		// PART_CONTENT (5) is only the first ~10 minutes. The URL is real, but
+		// remainingTime says when the full audio replaces it with FINISHED (1).
+		if audioURL := resp.GetUrl(); audioURL != "" && status != 5 {
 			return backend.TranslateResult{
 				AudioURL:      audioURL,
 				Duration:      resp.GetDuration(),
@@ -144,9 +167,25 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 		msg := resp.GetMessage()
 		retry := false
 		switch status {
-		case 2, 3, 6: // WAITING / LONG_WAITING / AUDIO_REQUESTED
+		case 5: // PART_CONTENT
+			if p.Debug {
+				fmt.Fprintf(os.Stderr, "[debug] [%s] partial audio only (%.0fs); waiting for the full translation\n", opts.backendName, resp.GetDuration())
+			}
+			retry = true
+		case 0, 2, 3, 6: // FAILED / WAITING / LONG_WAITING / AUDIO_REQUESTED
 			audioFixURL, canApplyAudioFix := youtubeAudioWorkaroundURL(p.URL)
-			if status == 6 && !triedAudioRequestedFix && canApplyAudioFix {
+			// shouldRetry=1 means the previous audio upload failed. A later run
+			// with real audio must still upload into that translation id; status
+			// stays 0 and never returns to AUDIO_REQUESTED.
+			recoverFailedAudio := status == 0 && shouldRetry == 1 && p.AudioRequestedRealUpload
+			if status == 2 || status == 3 || ((status == 6 || recoverFailedAudio) && !triedAudioRequestedFix && canApplyAudioFix) {
+				if status != 6 && !recoverFailedAudio {
+					retry = true
+					break
+				}
+				if recoverFailedAudio && p.Debug {
+					fmt.Fprintf(os.Stderr, "[debug] [%s] status=0 should_retry=1; uploading real audio into translation_id=%s\n", opts.backendName, translationID)
+				}
 				if translationID == "" {
 					msg = fmt.Sprintf("yandex: AUDIO_REQUESTED returned empty translationId%s", backendMsgSuffix(opts.backendName))
 					break
@@ -154,7 +193,7 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 
 				payload := &audioUploadPayload{
 					videoURL: audioFixURL,
-					fileID:   defaultAudioFileID,
+					fileID:   emptyAudioFileID(audioFixURL),
 					audio:    []byte{},
 				}
 				if opts.resolveAudioData != nil {
@@ -170,13 +209,20 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 					}
 				}
 
+				if p.AudioRequestedRealUpload && len(payload.audio) == 0 {
+					return backend.TranslateResult{}, fmt.Errorf("yandex: real audio was not downloaded%s", backendMsgSuffix(opts.backendName))
+				}
 				if p.Debug {
 					mode := "full"
 					if payload.chunked {
 						mode = "chunked"
 					}
-					fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: sending fail-audio/audio for translation_id=%s video_url=%s mode=%s file_id=%s audio_bytes=%d\n",
-						opts.backendName, translationID, payload.videoURL, mode, payload.fileID, len(payload.audio))
+					action := "audio"
+					if len(payload.audio) == 0 {
+						action = "fail-audio/audio"
+					}
+					fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: sending %s for translation_id=%s video_url=%s mode=%s file_id=%s audio_bytes=%d\n",
+						opts.backendName, action, translationID, payload.videoURL, mode, payload.fileID, len(payload.audio))
 				}
 				if err := opts.applyAudioFix(ctx, sess, payload.videoURL, translationID, payload.fileID, payload.audio, payload.chunked, payload.chunkLen); err != nil {
 					if payload.chunked || len(payload.audio) > 0 {
@@ -197,12 +243,15 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 								fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: full real-audio retry failed (%v), falling back to fake audio payload\n", opts.backendName, errFull)
 							}
 						}
+						if p.AudioRequestedRealUpload {
+							return backend.TranslateResult{}, fmt.Errorf("yandex: AUDIO_REQUESTED fix%s failed: %w", backendMsgSuffix(opts.backendName), err)
+						}
 						if p.Debug {
 							fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: real audio upload failed (%v), falling back to fake audio payload\n", opts.backendName, err)
 						}
 						fallback := &audioUploadPayload{
 							videoURL: audioFixURL,
-							fileID:   defaultAudioFileID,
+							fileID:   emptyAudioFileID(audioFixURL),
 							audio:    []byte{},
 						}
 						if err2 := opts.applyAudioFix(ctx, sess, fallback.videoURL, translationID, fallback.fileID, fallback.audio, false, 0); err2 == nil {
@@ -225,6 +274,10 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 				triedAudioRequestedFix = true
 				attempt--
 				continue
+			}
+			if status == 0 {
+				msg = notReadyMessage(opts.backendName, status, msg, p.DirectURL)
+				break
 			}
 			retry = true
 		case 7:
@@ -270,9 +323,21 @@ func backendMsgSuffix(backendName string) string {
 	return ""
 }
 
+func emptyAudioFileID(videoURL string) string {
+	id := strings.TrimPrefix(videoURL, "https://youtu.be/")
+	if i := strings.IndexAny(id, "?/"); i >= 0 {
+		id = id[:i]
+	}
+	id = strings.Trim(id, "/")
+	if id == "" {
+		id = "unknown"
+	}
+	return "fallback-empty-audio:video-translation:" + id
+}
+
 func buildAudioFileID(downloadType string, minChunkSize int, fileSize int) string {
 	if minChunkSize <= 0 {
-		minChunkSize = 5 * 1024 * 1024
+		minChunkSize = yandexMinChunkSize
 	}
 	if fileSize < 0 {
 		fileSize = 0
@@ -299,15 +364,34 @@ func selectAudioDownloadType(videoURL string) string {
 }
 
 func chooseChunkSize(total int) int {
-	const minChunk = 5 * 1024 * 1024
 	switch {
 	case total > 40*1024*1024:
 		return 8 * 1024 * 1024
 	case total > 20*1024*1024:
 		return 6 * 1024 * 1024
 	default:
-		return minChunk
+		return yandexMinChunkSize
 	}
+}
+
+// validateAudioUploadResponse checks the protobuf status Yandex returns after
+// a real audio PUT. 1 means more chunks are expected, 2 means the file is complete.
+func validateAudioUploadResponse(body []byte, last bool) error {
+	var resp yandexproto.VideoTranslationAudioResponse
+	if err := proto.Unmarshal(body, &resp); err != nil {
+		return fmt.Errorf("decode audio upload response: %w", err)
+	}
+	status := resp.GetStatus()
+	if last {
+		if status != 2 {
+			return fmt.Errorf("audio upload not complete (status=%d, want 2, remaining=%v)", status, resp.GetRemainingChunks())
+		}
+		return nil
+	}
+	if status != 1 && status != 2 {
+		return fmt.Errorf("unexpected audio upload status %d (remaining=%v)", status, resp.GetRemainingChunks())
+	}
+	return nil
 }
 
 func isTransientAudioUploadError(err error) bool {

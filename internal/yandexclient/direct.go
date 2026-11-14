@@ -41,6 +41,46 @@ type DirectClient struct {
 	sessions map[string]*clientSession
 }
 
+// ComponentVersion is the YaBrowser build embedded in Sec-*-Token.
+func ComponentVersion() string {
+	return defaultComponentVersion
+}
+
+// UserAgentMatchesComponent reports whether ua names the same YaBrowser
+// major.minor as ComponentVersion. A config UA from an older snapshot must
+// not be sent together with the current component version.
+func UserAgentMatchesComponent(ua string) bool {
+	const marker = "YaBrowser/"
+	i := strings.Index(ua, marker)
+	if i < 0 {
+		return false
+	}
+	rest := ua[i+len(marker):]
+	parts := strings.Split(defaultComponentVersion, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	return strings.HasPrefix(rest, parts[0]+"."+parts[1]+".")
+}
+
+func browserClientHints() map[string]string {
+	short := defaultComponentVersion
+	if len(short) > 5 {
+		short = short[:5]
+	}
+	return map[string]string{
+		"sec-ch-ua":                   fmt.Sprintf(`"Chromium";v="152", "Not?A_Brand";v="24", "YaBrowser";v="%s", "Yowser";v="2.5"`, short),
+		"sec-ch-ua-full-version-list": fmt.Sprintf(`"Chromium";v="152.0.7977.%s", "Not?A_Brand";v="24.0.0.0", "YaBrowser";v="%s", "Yowser";v="2.5"`, defaultChromiumRevision, defaultComponentVersion),
+		"Sec-Fetch-Mode":              "no-cors",
+	}
+}
+
+func applyBrowserClientHints(h http.Header) {
+	for k, v := range browserClientHints() {
+		h.Set(k, v)
+	}
+}
+
 // SetUserAgent overrides the default User-Agent if non-empty.
 func (c *DirectClient) SetUserAgent(ua string) {
 	if ua != "" {
@@ -78,11 +118,13 @@ type clientSession struct {
 const (
 	defaultSchema           = "https"
 	defaultHost             = "api.browser.yandex.ru"
-	defaultUserAgent        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 YaBrowser/26.4.1.1026 Yowser/2.5 Safari/537.36"
-	defaultComponentVersion = "26.4.1.1026"
+	// Pair from vot.js 3.2.2. The UA, componentVersion inside Sec-*-Token, and
+	// sec-ch-ua hints must describe the same YaBrowser build.
+	defaultUserAgent        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 YaBrowser/26.10.0.0 Safari/537.36"
+	defaultComponentVersion = "26.10.0.1854"
+	defaultChromiumRevision = "1854"
 	defaultHMACKey          = "bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf"
-	defaultTimeout          = 30 * time.Second
-	defaultAudioFileID      = "web_api_get_all_generating_urls_data_from_iframe"
+	defaultTimeout = 30 * time.Second
 )
 
 // NewDirectClient creates a DirectClient with sane defaults.
@@ -118,8 +160,12 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 			}
 		},
 		applyAudioFix: func(ctx context.Context, sess *clientSession, videoURL, translationID, fileID string, audio []byte, chunked bool, chunkLen int) error {
-			if err := c.requestVtransFailAudio(ctx, videoURL); err != nil {
-				return fmt.Errorf("at fail-audio-js: %w", err)
+			// fail-audio-js is the empty-audio workaround from vot.js. A real
+			// upload must not be marked failed before the bytes are sent.
+			if len(audio) == 0 {
+				if err := c.requestVtransFailAudio(ctx, videoURL); err != nil {
+					return fmt.Errorf("at fail-audio-js: %w", err)
+				}
 			}
 			if err := c.requestVtransAudio(ctx, sess, videoURL, translationID, fileID, audio, chunked, chunkLen); err != nil {
 				return fmt.Errorf("at audio upload: %w", err)
@@ -210,9 +256,11 @@ func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 			}
 			path := "/video-translation/audio"
 			headers := c.secYaHeaders("Vtrans", sess, body, path)
+			last := part == totalParts-1
 			var uploadErr error
 			for uploadAttempt := 1; uploadAttempt <= maxUploadAttempts; uploadAttempt++ {
-				if _, err := c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
+				resBody, err := c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers)
+				if err != nil {
 					uploadErr = err
 					if uploadAttempt < maxUploadAttempts && isTransientAudioUploadError(err) {
 						backoff := time.Duration(uploadAttempt) * time.Second
@@ -223,6 +271,10 @@ func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 						}
 						continue
 					}
+					break
+				}
+				if err := validateAudioUploadResponse(resBody, last); err != nil {
+					uploadErr = err
 					break
 				}
 				uploadErr = nil
@@ -252,7 +304,8 @@ func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 	headers := c.secYaHeaders("Vtrans", sess, body, path)
 	var uploadErr error
 	for uploadAttempt := 1; uploadAttempt <= maxUploadAttempts; uploadAttempt++ {
-		if _, err = c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers); err != nil {
+		resBody, err := c.doProtoRequestWithMethod(ctx, http.MethodPut, path, body, headers)
+		if err != nil {
 			uploadErr = err
 			if uploadAttempt < maxUploadAttempts && isTransientAudioUploadError(err) {
 				backoff := time.Duration(uploadAttempt) * time.Second
@@ -264,6 +317,12 @@ func (c *DirectClient) requestVtransAudio(ctx context.Context, sess *clientSessi
 				continue
 			}
 			break
+		}
+		if len(audio) > 0 {
+			if err := validateAudioUploadResponse(resBody, true); err != nil {
+				uploadErr = err
+				break
+			}
 		}
 		uploadErr = nil
 		break
@@ -303,13 +362,14 @@ func resolveAudioDataForUpload(ctx context.Context, p backend.TranslateParams, _
 		return nil, false
 	}
 
-	fileID := buildAudioFileID(selectAudioDownloadType(directURL), 5*1024*1024, len(audioBytes))
+	chunkLen := chooseChunkSize(len(audioBytes))
+	fileID := buildAudioFileID(selectAudioDownloadType(directURL), yandexMinChunkSize, len(audioBytes))
 	return &audioUploadPayload{
 		videoURL: audioFixURL,
 		fileID:   fileID,
 		audio:    audioBytes,
-		chunked:  true,
-		chunkLen: chooseChunkSize(len(audioBytes)),
+		chunked:  len(audioBytes) > chunkLen,
+		chunkLen: chunkLen,
 	}, true
 }
 
@@ -514,6 +574,7 @@ func (c *DirectClient) doProtoRequestWithMethod(ctx context.Context, method, pat
 	req.Header.Set("Content-Type", "application/x-protobuf")
 	req.Header.Set("Pragma", "no-cache")
 	req.Header.Set("Cache-Control", "no-cache")
+	applyBrowserClientHints(req.Header)
 
 	for k, v := range extraHeaders {
 		req.Header.Set(k, v)
@@ -555,6 +616,7 @@ func (c *DirectClient) doJSONRequest(ctx context.Context, method, path string, b
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Accept-Language", "en")
 	req.Header.Set("Content-Type", "application/json")
+	applyBrowserClientHints(req.Header)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

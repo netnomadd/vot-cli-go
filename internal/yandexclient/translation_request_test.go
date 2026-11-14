@@ -1,6 +1,7 @@
 package yandexclient
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +56,57 @@ func TestEncodeTranslationRequestAlwaysSupportsTrueFirstRequest(t *testing.T) {
 
 	if !req.GetFirstRequest() {
 		t.Fatal("expected firstRequest=true")
+	}
+}
+
+func TestUserAgentMatchesComponent(t *testing.T) {
+	if !UserAgentMatchesComponent(defaultUserAgent) {
+		t.Fatal("built-in user agent should match the component version")
+	}
+	old := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 YaBrowser/24.4.0.0 Safari/537.36"
+	if UserAgentMatchesComponent(old) {
+		t.Fatal("YaBrowser 24.4 must not match the current component")
+	}
+	hints := browserClientHints()
+	if !strings.Contains(hints["sec-ch-ua"], "YaBrowser") || !strings.Contains(hints["sec-ch-ua-full-version-list"], defaultComponentVersion) {
+		t.Fatalf("sec-ch-ua hints = %#v", hints)
+	}
+}
+
+func TestEmptyAudioFileID(t *testing.T) {
+	got := emptyAudioFileID("https://youtu.be/RYO-RGXs00c")
+	want := "fallback-empty-audio:video-translation:RYO-RGXs00c"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestChooseChunkSizeRespectsYandexMinimum(t *testing.T) {
+	if got := chooseChunkSize(10_575_016); got != yandexMinChunkSize {
+		t.Fatalf("10MB chunk = %d, want %d", got, yandexMinChunkSize)
+	}
+	if got := chooseChunkSize(30 * 1024 * 1024); got < yandexMinChunkSize {
+		t.Fatalf("chunk %d is below yandex minimum %d", got, yandexMinChunkSize)
+	}
+}
+
+func TestValidateAudioUploadResponse(t *testing.T) {
+	done, err := proto.Marshal(&yandexproto.VideoTranslationAudioResponse{Status: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateAudioUploadResponse(done, true); err != nil {
+		t.Fatalf("complete upload: %v", err)
+	}
+	waiting, err := proto.Marshal(&yandexproto.VideoTranslationAudioResponse{Status: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateAudioUploadResponse(waiting, false); err != nil {
+		t.Fatalf("intermediate chunk: %v", err)
+	}
+	if err := validateAudioUploadResponse(waiting, true); err == nil {
+		t.Fatal("expected last chunk with status 1 to fail")
 	}
 }
 

@@ -593,18 +593,22 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		effectiveVotHost = flagVotHost
 	}
 	if cfg != nil {
-		directClient.SetUserAgent(cfg.UserAgent)
+		if cfg.UserAgent != "" && !yandexclient.UserAgentMatchesComponent(cfg.UserAgent) {
+			fmt.Fprintf(os.Stderr, "[warn] config user_agent does not match Yandex component %s (vot.js sends one pair). Ignoring config user_agent.\n", yandexclient.ComponentVersion())
+		} else {
+			directClient.SetUserAgent(cfg.UserAgent)
+			workerClient.SetUserAgent(cfg.UserAgent)
+			votBackendClient.SetUserAgent(cfg.UserAgent)
+		}
 		directClient.SetHMACKey(cfg.YandexHMACKey)
 		directClient.SetAPIToken(cfg.YandexToken)
 
-		workerClient.SetUserAgent(cfg.UserAgent)
 		workerClient.SetHMACKey(cfg.YandexHMACKey)
 		workerClient.SetAPIToken(cfg.YandexToken)
 		if err := workerClient.SetWorkerURL(cfg.WorkerURL); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidWorkerURLFmt+"\n", msg.ErrorPrefix, cfg.WorkerURL, err)
 			os.Exit(1)
 		}
-		votBackendClient.SetUserAgent(cfg.UserAgent)
 	}
 	if err := votBackendClient.SetVOTHost(effectiveVotHost); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: "+msg.InvalidVotHostFmt+"\n", msg.ErrorPrefix, effectiveVotHost, err)
