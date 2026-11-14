@@ -37,6 +37,7 @@ type WorkerClient struct {
 	userAgent        string
 	hmacKey          string
 	componentVersion string
+	apiToken         string
 
 	// session cache per module (e.g. "video-translation")
 	sessions map[string]*clientSession
@@ -84,10 +85,12 @@ func (c *WorkerClient) SetHMACKey(key string) {
 	}
 }
 
-// SetAPIToken is accepted for API parity with DirectClient but is not
-// currently used by the worker backend (OAuth happens server-side).
+// SetAPIToken stores the OAuth token used to decide whether lively voice
+// may be requested. The worker transport does not send the header itself.
 func (c *WorkerClient) SetAPIToken(token string) {
-	_ = token
+	if token != "" {
+		c.apiToken = token
+	}
 }
 
 // SetHTTPProxy configures an HTTP(S) proxy for worker requests.
@@ -331,7 +334,7 @@ func (c *WorkerClient) encodeTranslationRequest(url string, duration float64, re
 		Unknown2:         1,
 		Unknown3:         2,
 		BypassCache:      p.BypassCache,
-		UseLivelyVoice:   p.VoiceStyle == backend.VoiceStyleLive,
+		UseLivelyVoice:   livelyVoiceEnabled(p.VoiceStyle, reqLang, respLang, c.apiToken),
 		VideoTitle:       p.VideoTitle,
 		TranslationHelp:  buildTranslationHelp(url, p),
 	}

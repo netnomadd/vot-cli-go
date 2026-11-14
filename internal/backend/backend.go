@@ -37,8 +37,9 @@ type TranslateParams struct {
 	YtDLPCookiesFromBrowser string
 	// Optional HTTP(S) proxy URL passed to yt-dlp (--proxy) during recovery.
 	HTTPProxy string
-	// If true, AUDIO_REQUESTED handler attempts real-audio upload first.
-	// If false, it follows vot.js-like behaviour (fake/empty audio payload only).
+	// If true, AUDIO_REQUESTED tries a real yt-dlp audio upload first and
+	// sends the empty fail-audio payload only when that upload fails.
+	// If false, only the empty payload is sent.
 	AudioRequestedRealUpload bool
 
 	// Polling configuration (seconds between attempts, number of attempts).

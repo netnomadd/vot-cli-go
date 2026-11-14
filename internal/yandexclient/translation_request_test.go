@@ -59,6 +59,73 @@ func TestEncodeTranslationRequestAlwaysSupportsTrueFirstRequest(t *testing.T) {
 	}
 }
 
+func TestLivelyVoiceEnabled(t *testing.T) {
+	if !livelyVoiceEnabled(backend.VoiceStyleLive, "en", "ru", "token") {
+		t.Fatal("en→ru with a token should request lively voice")
+	}
+	if livelyVoiceEnabled(backend.VoiceStyleLive, "EN", "RU", "token") == false {
+		t.Fatal("language check should be case-insensitive")
+	}
+	cases := []struct {
+		style backend.VoiceStyle
+		req   string
+		resp  string
+		token string
+	}{
+		{backend.VoiceStyleLive, "en", "ru", ""},
+		{backend.VoiceStyleLive, "auto", "ru", "token"},
+		{backend.VoiceStyleLive, "", "ru", "token"},
+		{backend.VoiceStyleLive, "en", "en", "token"},
+		{backend.VoiceStyleTTS, "en", "ru", "token"},
+	}
+	for _, tc := range cases {
+		if livelyVoiceEnabled(tc.style, tc.req, tc.resp, tc.token) {
+			t.Fatalf("lively voice enabled for %+v", tc)
+		}
+	}
+}
+
+func TestEncodeTranslationRequestLivelyVoiceRequiresToken(t *testing.T) {
+	c := NewDirectClient()
+	p := backend.TranslateParams{ResponseLang: "ru", VoiceStyle: backend.VoiceStyleLive, RequestLang: "en"}
+	body, err := c.encodeTranslationRequest("https://youtu.be/abc", 120, "en", "ru", p, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req yandexproto.VideoTranslationRequest
+	if err := proto.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.GetUseLivelyVoice() {
+		t.Fatal("lively voice must stay off without an OAuth token")
+	}
+	c.SetAPIToken("token")
+	body, err = c.encodeTranslationRequest("https://youtu.be/abc", 120, "en", "ru", p, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := proto.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	if !req.GetUseLivelyVoice() {
+		t.Fatal("en→ru with a token should set useLivelyVoice")
+	}
+}
+
+func TestYtDLPAudioFormat(t *testing.T) {
+	if got := ytDLPAudioFormat("en"); got != "ba[language^=en]/ba" {
+		t.Fatalf("en format = %q", got)
+	}
+	if got := ytDLPAudioFormat(" EN "); got != "ba[language^=en]/ba" {
+		t.Fatalf("trimmed format = %q", got)
+	}
+	for _, lang := range []string{"", "auto", "AUTO", "en/ru"} {
+		if got := ytDLPAudioFormat(lang); got != "ba" {
+			t.Fatalf("format(%q) = %q, want ba", lang, got)
+		}
+	}
+}
+
 func TestUserAgentMatchesComponent(t *testing.T) {
 	if !UserAgentMatchesComponent(defaultUserAgent) {
 		t.Fatal("built-in user agent should match the component version")

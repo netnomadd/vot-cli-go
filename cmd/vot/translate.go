@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -56,7 +55,6 @@ type messages struct {
 	FlagYtDLPCookiesHelp             string
 	FlagYtDLPCookiesFromBrowserHelp  string
 	FlagExplainHelp                  string
-	FlagAllowLongVideoHelp           string
 	FlagAudioRequestedRealUploadHelp string
 	FlagOutdirHelp                   string
 	FlagOutfileHelp                  string
@@ -91,7 +89,6 @@ type messages struct {
 	YtDLPFailureFmt                  string
 	SessionRequiredHelp              string
 	UnsupportedDirectURLHelp         string
-	VideoTooLongFmt                  string
 
 	// Doctor command
 	UsageDoctor               string
@@ -113,8 +110,6 @@ type messages struct {
 	DoctorYtDLPNotFoundFmt    string
 	DoctorSummaryOK           string
 }
-
-const maxVideoDurationSec = 4 * 60 * 60
 
 // getMessages returns localized messages based on --lang flag, VOT_LANG or CLI args.
 func getMessages() messages {
@@ -173,8 +168,7 @@ func getMessages() messages {
 			FlagYtDLPCookiesHelp:             "путь к файлу cookies, передаваемому в yt-dlp (--cookies)",
 			FlagYtDLPCookiesFromBrowserHelp:  "браузер для передачи cookies в yt-dlp (--cookies-from-browser)",
 			FlagExplainHelp:                  "показать, как будет обработан каждый URL, и выйти, не обращаясь к backend'ам",
-			FlagAllowLongVideoHelp:           "разрешить видео длиннее 4 часов (отключить локальную pre-check проверку лимита длительности)",
-			FlagAudioRequestedRealUploadHelp: "при AUDIO_REQUESTED пытаться загрузить реальное аудио (иначе поведение как в vot.js: только fake/empty audio)",
+			FlagAudioRequestedRealUploadHelp: "при AUDIO_REQUESTED сначала загрузить реальное аудио через yt-dlp (по умолчанию включено; false — только пустое аудио)",
 			FlagOutdirHelp:                   "каталог для сохранения переведённого аудио (без флага — только URL)",
 			FlagOutfileHelp:                  "имя выходного файла (только для одного URL; иначе videoId/title.mp3)",
 			FlagNoTitleHelp:                  "в имени файла использовать videoId/hash, не title из yt-dlp",
@@ -208,7 +202,6 @@ func getMessages() messages {
 			YtDLPFailureFmt:                  "yt-dlp не смог обработать этот URL %s; продолжаю без yt-dlp.",
 			SessionRequiredHelp:              "Подсказка: SESSION_REQUIRED обычно означает, что видео доступно только авторизованным пользователям Яндекс-Браузера; CLI не может обойти это ограничение.",
 			UnsupportedDirectURLHelp:         "Подсказка: backend не принимает этот прямой URL; попробуйте передать исходный URL страницы или отключить режим прямых ссылок / yt-dlp direct.",
-			VideoTooLongFmt:                  "видео слишком длинное: %.0f секунд (лимит %d секунд / 4 часа)",
 
 			UsageDoctor:               "использование: vot doctor [глобальные опции]",
 			DoctorChecksHeader:        "проверки:",
@@ -261,8 +254,7 @@ func getMessages() messages {
 			FlagYtDLPCookiesHelp:             "path to cookies file to pass to yt-dlp (--cookies)",
 			FlagYtDLPCookiesFromBrowserHelp:  "browser spec to pass to yt-dlp (--cookies-from-browser)",
 			FlagExplainHelp:                  "print how each URL will be handled and exit without contacting backends",
-			FlagAllowLongVideoHelp:           "allow videos longer than 4 hours (disable local pre-check duration limit)",
-			FlagAudioRequestedRealUploadHelp: "for AUDIO_REQUESTED, try real-audio upload (otherwise vot.js-like behaviour: fake/empty audio only)",
+			FlagAudioRequestedRealUploadHelp: "on AUDIO_REQUESTED, upload real audio via yt-dlp first (default true; false sends only empty audio)",
 			FlagOutdirHelp:                   "directory to save translated audio (omit to print URL only)",
 			FlagOutfileHelp:                  "output file name (single URL only; otherwise videoId/title.mp3)",
 			FlagNoTitleHelp:                  "use videoId/hash in file name instead of yt-dlp title",
@@ -296,7 +288,6 @@ func getMessages() messages {
 			YtDLPFailureFmt:                  "yt-dlp failed for this URL %s; continuing without yt-dlp.",
 			SessionRequiredHelp:              "hint: SESSION_REQUIRED usually means the video is limited to logged-in Yandex Browser users; the CLI cannot bypass this restriction.",
 			UnsupportedDirectURLHelp:         "hint: the backend does not accept this direct URL; try passing the original page URL or disabling direct-url / yt-dlp direct mode.",
-			VideoTooLongFmt:                  "video is too long: %.0f seconds (limit %d seconds / 4 hours)",
 
 			UsageDoctor:               "usage: vot doctor [global options]",
 			DoctorChecksHeader:        "checks:",
@@ -352,7 +343,6 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		flagYtDLPCookies             string
 		flagYtDLPCookiesFromBrowser  string
 		flagExplain                  bool
-		flagAllowLongVideo           bool
 		flagAudioRequestedRealUpload bool
 		flagOutdir                   string
 		flagOutfile                  string
@@ -377,8 +367,7 @@ func translateMain(parent *flag.FlagSet, args []string) {
 	fs.StringVar(&flagYtDLPCookies, "yt-dlp-cookies", "", msg.FlagYtDLPCookiesHelp)
 	fs.StringVar(&flagYtDLPCookiesFromBrowser, "yt-dlp-cookies-from-browser", "", msg.FlagYtDLPCookiesFromBrowserHelp)
 	fs.BoolVar(&flagExplain, "explain", false, msg.FlagExplainHelp)
-	fs.BoolVar(&flagAllowLongVideo, "allow-long-video", false, msg.FlagAllowLongVideoHelp)
-	fs.BoolVar(&flagAudioRequestedRealUpload, "audio-requested-real-upload", false, msg.FlagAudioRequestedRealUploadHelp)
+	fs.BoolVar(&flagAudioRequestedRealUpload, "audio-requested-real-upload", true, msg.FlagAudioRequestedRealUploadHelp)
 	fs.StringVarP(&flagOutdir, "outdir", "o", "", msg.FlagOutdirHelp)
 	fs.StringVar(&flagOutfile, "outfile", "", msg.FlagOutfileHelp)
 	fs.BoolVar(&flagNoTitle, "no-title", false, msg.FlagNoTitleHelp)
@@ -650,7 +639,6 @@ func translateMain(parent *flag.FlagSet, args []string) {
 		effectiveReqLang := flagReqLang
 		effectiveBackend := flagBackend
 		effectiveVoiceStyle := flagVoiceStyle
-		var durationSec float64
 		videoID := extractVideoID(u)
 
 		failItem := func(errText string) {
@@ -701,23 +689,8 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			cookies = ""
 		}
 
-		// Optionally use yt-dlp to resolve a direct media URL and obtain duration.
-		if useYtDLPForURL {
-			if d, err := getVideoDurationWithYtDLP(effectiveURL, cookies, cookiesFromBrowser, ytDLPProxy); err != nil {
-				if !quietStderr {
-					if flagDebug {
-						fmt.Fprintf(os.Stderr, "[debug] yt-dlp failed to get duration for %s: %v\n", effectiveURL, err)
-					}
-					fmt.Fprintf(os.Stderr, "%s: "+msg.YtDLPFailureFmt+"\n", msg.ErrorPrefix, u)
-					fmt.Fprintln(os.Stderr, msg.YtDLPAuthHint)
-				}
-			} else {
-				durationSec = d
-				if flagDebug && !quietStderr {
-					fmt.Fprintf(os.Stderr, "[debug] yt-dlp duration for %s: %.1fs\n", effectiveURL, d)
-				}
-			}
-
+		// yt-dlp -g runs only when the resolved media URL is sent to the backend.
+		if useYtDLPForURL && ytDLPUseDirectURLForURL {
 			if directURL, err := resolveDirectURLWithYtDLP(effectiveURL, cookies, cookiesFromBrowser, ytDLPProxy); err != nil {
 				if !quietStderr {
 					if flagDebug {
@@ -730,26 +703,12 @@ func translateMain(parent *flag.FlagSet, args []string) {
 				if flagDebug && !quietStderr {
 					fmt.Fprintf(os.Stderr, "[debug] yt-dlp resolved %s -> %s\n", effectiveURL, directURL)
 				}
-				if ytDLPUseDirectURLForURL {
-					effectiveURL = directURL
-					effectiveDirect = true
-				}
+				effectiveURL = directURL
+				effectiveDirect = true
 			}
 		}
 
 		sourceKind := classifySource(effectiveURL)
-
-		if durationSec > maxVideoDurationSec && !flagAllowLongVideo {
-			errText := fmt.Sprintf(msg.VideoTooLongFmt, durationSec, maxVideoDurationSec)
-			if !useJSON {
-				fmt.Fprintf(os.Stderr, "%s: %s: %s\n", msg.ErrorPrefix, u, errText)
-			} else if !flagSilent {
-				fmt.Fprintf(os.Stderr, "%s: %s: %s\n", msg.ErrorPrefix, u, errText)
-			}
-			cancel()
-			failItem(errText)
-			continue
-		}
 
 		directForBackend := effectiveDirect
 		if sourceKind == "direct_media" {
@@ -967,7 +926,6 @@ func translateMain(parent *flag.FlagSet, args []string) {
 			DirectURL:                directForBackend,
 			SubsURL:                  flagSubsURL,
 			VoiceStyle:               voiceStyle,
-			DurationSec:              durationSec,
 			UseYtDLP:                 useYtDLPForURL,
 			YtDLPCookies:             cookies,
 			YtDLPCookiesFromBrowser:  cookiesFromBrowser,
@@ -1140,64 +1098,6 @@ func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser, proxyU
 	}
 
 	return url, nil
-}
-
-// getVideoDurationWithYtDLP asks yt-dlp to print video duration (in seconds)
-// for the given URL and parses it into float64.
-func getVideoDurationWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser, proxyURL string) (float64, error) {
-	if _, err := exec.LookPath("yt-dlp"); err != nil {
-		return 0, fmt.Errorf("yt-dlp not found in PATH: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	args := []string{"--print", "duration"}
-	if cookiesFile != "" {
-		args = append(args, "--cookies", cookiesFile)
-	}
-	if cookiesFromBrowser != "" {
-		args = append(args, "--cookies-from-browser", cookiesFromBrowser)
-	}
-	args = proxyutil.AppendYtDLPArgs(args, proxyURL)
-	args = append(args, videoURL)
-
-	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return 0, fmt.Errorf("yt-dlp failed to get duration: %w (output: %s)", err, strings.TrimSpace(string(output)))
-	}
-
-	raw := strings.TrimSpace(string(output))
-	if raw == "" {
-		return 0, fmt.Errorf("yt-dlp returned empty duration")
-	}
-
-	// yt-dlp can emit warnings plus the duration; search from the end
-	// for the first line that parses as a float.
-	lines := strings.Split(raw, "\n")
-	var value string
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			continue
-		}
-		if _, err := strconv.ParseFloat(line, 64); err == nil {
-			value = line
-			break
-		}
-	}
-
-	if value == "" {
-		return 0, fmt.Errorf("yt-dlp did not return a numeric duration (output: %s)", raw)
-	}
-
-	sec, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse yt-dlp duration %q: %w", value, err)
-	}
-
-	return sec, nil
 }
 
 // classifySource returns a coarse-grained classification of the given URL

@@ -116,15 +116,15 @@ type clientSession struct {
 }
 
 const (
-	defaultSchema           = "https"
-	defaultHost             = "api.browser.yandex.ru"
+	defaultSchema = "https"
+	defaultHost   = "api.browser.yandex.ru"
 	// Pair from vot.js 3.2.2. The UA, componentVersion inside Sec-*-Token, and
 	// sec-ch-ua hints must describe the same YaBrowser build.
 	defaultUserAgent        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 YaBrowser/26.10.0.0 Safari/537.36"
 	defaultComponentVersion = "26.10.0.1854"
 	defaultChromiumRevision = "1854"
 	defaultHMACKey          = "bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf"
-	defaultTimeout = 30 * time.Second
+	defaultTimeout          = 30 * time.Second
 )
 
 // NewDirectClient creates a DirectClient with sane defaults.
@@ -155,7 +155,7 @@ func (c *DirectClient) TranslateVideo(ctx context.Context, p backend.TranslatePa
 		secHeaders:    c.secYaHeaders,
 		sendTranslate: c.doProtoRequest,
 		beforeTranslate: func(headers map[string]string, p backend.TranslateParams) {
-			if p.VoiceStyle == backend.VoiceStyleLive && c.apiToken != "" {
+			if livelyVoiceEnabled(p.VoiceStyle, p.RequestLang, p.ResponseLang, c.apiToken) {
 				headers["Authorization"] = "OAuth " + c.apiToken
 			}
 		},
@@ -346,15 +346,8 @@ func resolveAudioDataForUpload(ctx context.Context, p backend.TranslateParams, _
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		return nil, false
 	}
-	directURL, err := resolveDirectURLWithYtDLP(candidateURL, p.YtDLPCookies, p.YtDLPCookiesFromBrowser, p.HTTPProxy)
-	if err != nil {
-		if p.Debug {
-			fmt.Fprintf(os.Stderr, "[debug] [direct] AUDIO_REQUESTED: yt-dlp direct URL resolution failed: %v\n", err)
-		}
-		return nil, false
-	}
 
-	audioBytes, err := downloadAudioWithYtDLP(ctx, candidateURL, p.YtDLPCookies, p.YtDLPCookiesFromBrowser, p.HTTPProxy)
+	audioBytes, err := downloadAudioWithYtDLP(ctx, candidateURL, p.YtDLPCookies, p.YtDLPCookiesFromBrowser, p.HTTPProxy, p.RequestLang)
 	if err != nil {
 		if p.Debug {
 			fmt.Fprintf(os.Stderr, "[debug] [direct] AUDIO_REQUESTED: yt-dlp audio download failed, using empty payload fallback: %v\n", err)
@@ -363,7 +356,7 @@ func resolveAudioDataForUpload(ctx context.Context, p backend.TranslateParams, _
 	}
 
 	chunkLen := chooseChunkSize(len(audioBytes))
-	fileID := buildAudioFileID(selectAudioDownloadType(directURL), yandexMinChunkSize, len(audioBytes))
+	fileID := buildAudioFileID(youtubeAudioDownloadType, yandexMinChunkSize, len(audioBytes))
 	return &audioUploadPayload{
 		videoURL: audioFixURL,
 		fileID:   fileID,
@@ -456,7 +449,7 @@ func (c *DirectClient) encodeTranslationRequest(url string, duration float64, re
 		Unknown2:         1,
 		Unknown3:         2,
 		BypassCache:      p.BypassCache,
-		UseLivelyVoice:   p.VoiceStyle == backend.VoiceStyleLive,
+		UseLivelyVoice:   livelyVoiceEnabled(p.VoiceStyle, reqLang, respLang, c.apiToken),
 		VideoTitle:       p.VideoTitle,
 		TranslationHelp:  buildTranslationHelp(url, p),
 	}

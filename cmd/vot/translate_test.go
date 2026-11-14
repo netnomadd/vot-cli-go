@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/netnomadd/vot-cli-go/internal/config"
@@ -144,16 +142,5 @@ func TestYtDLPCookiesParentDirCheck(t *testing.T) {
 	}
 	if got := normalizeYtDLPCookiesPath(bad); got != "" {
 		t.Fatalf("expected invalid path to be dropped, got %q", got)
-	}
-}
-
-func TestVideoTooLongErrorMessage(t *testing.T) {
-	msg := getMessages()
-	got := strings.ToLower(fmt.Sprintf(msg.VideoTooLongFmt, 14401.0, maxVideoDurationSec))
-	if !strings.Contains(got, "4") {
-		t.Fatalf("expected message to mention limit context, got %q", got)
-	}
-	if !strings.Contains(got, "14400") {
-		t.Fatalf("expected message to include numeric limit, got %q", got)
 	}
 }

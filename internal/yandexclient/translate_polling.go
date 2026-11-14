@@ -209,9 +209,6 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 					}
 				}
 
-				if p.AudioRequestedRealUpload && len(payload.audio) == 0 {
-					return backend.TranslateResult{}, fmt.Errorf("yandex: real audio was not downloaded%s", backendMsgSuffix(opts.backendName))
-				}
 				if p.Debug {
 					mode := "full"
 					if payload.chunked {
@@ -242,11 +239,7 @@ func translateVideoWithPolling(ctx context.Context, p backend.TranslateParams, o
 							} else if p.Debug {
 								fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: full real-audio retry failed (%v), falling back to fake audio payload\n", opts.backendName, errFull)
 							}
-						}
-						if p.AudioRequestedRealUpload {
-							return backend.TranslateResult{}, fmt.Errorf("yandex: AUDIO_REQUESTED fix%s failed: %w", backendMsgSuffix(opts.backendName), err)
-						}
-						if p.Debug {
+						} else if p.Debug {
 							fmt.Fprintf(os.Stderr, "[debug] [%s] AUDIO_REQUESTED: real audio upload failed (%v), falling back to fake audio payload\n", opts.backendName, err)
 						}
 						fallback := &audioUploadPayload{
@@ -355,13 +348,10 @@ func buildAudioFileID(downloadType string, minChunkSize int, fileSize int) strin
 	return string(b)
 }
 
-func selectAudioDownloadType(videoURL string) string {
-	v := strings.ToLower(videoURL)
-	if strings.Contains(v, "googlevideo.com") || strings.Contains(v, ".webm") {
-		return "web_api_get_all_generating_urls_data_from_iframe"
-	}
-	return "web_api_video_src"
-}
+// youtubeAudioDownloadType is the fileId download type previously chosen when
+// yt-dlp -g returned a googlevideo URL. YouTube audio is that kind of file,
+// so the upload does not need a separate -g call to discover it.
+const youtubeAudioDownloadType = "web_api_get_all_generating_urls_data_from_iframe"
 
 func chooseChunkSize(total int) int {
 	switch {
@@ -410,40 +400,38 @@ func isTransientAudioUploadError(err error) bool {
 		strings.Contains(msg, "malformed http response")
 }
 
-func resolveDirectURLWithYtDLP(videoURL, cookiesFile, cookiesFromBrowser, proxyURL string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	args := []string{"-g"}
-	if cookiesFile != "" {
-		args = append(args, "--cookies", cookiesFile)
+// livelyVoiceEnabled matches vot-cli: lively voice is requested only with an
+// OAuth token, a concrete source language, and a Russian response.
+func livelyVoiceEnabled(style backend.VoiceStyle, requestLang, responseLang, apiToken string) bool {
+	if style != backend.VoiceStyleLive || strings.TrimSpace(apiToken) == "" {
+		return false
 	}
-	if cookiesFromBrowser != "" {
-		args = append(args, "--cookies-from-browser", cookiesFromBrowser)
+	req := strings.ToLower(strings.TrimSpace(requestLang))
+	resp := strings.ToLower(strings.TrimSpace(responseLang))
+	if req == "" || req == "auto" || resp != "ru" {
+		return false
 	}
-	args = proxyutil.AppendYtDLPArgs(args, proxyURL)
-	args = append(args, videoURL)
-
-	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("yt-dlp failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
-	}
-
-	raw := strings.TrimSpace(string(output))
-	if raw == "" {
-		return "", fmt.Errorf("yt-dlp returned empty output")
-	}
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, "://") {
-			return line, nil
-		}
-	}
-	return "", fmt.Errorf("yt-dlp did not return a direct URL")
+	return true
 }
 
-func downloadAudioWithYtDLP(ctx context.Context, videoURL, cookiesFile, cookiesFromBrowser, proxyURL string) ([]byte, error) {
+// ytDLPAudioFormat prefers an audio track in the requested language.
+// bestaudio stays the fallback when that language is missing or not set.
+// The sort order is left at yt-dlp's default: reversing size and bitrate
+// would pick the smallest, lowest-quality match.
+func ytDLPAudioFormat(requestLang string) string {
+	lang := strings.ToLower(strings.TrimSpace(requestLang))
+	if lang == "" || lang == "auto" {
+		return "ba"
+	}
+	for _, r := range lang {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+			return "ba"
+		}
+	}
+	return "ba[language^=" + lang + "]/ba"
+}
+
+func downloadAudioWithYtDLP(ctx context.Context, videoURL, cookiesFile, cookiesFromBrowser, proxyURL, requestLang string) ([]byte, error) {
 	// Give yt-dlp enough time on long videos; a hard 2-minute limit often
 	// kills download right before completion and prevents chunked upload.
 	timeout := 20 * time.Minute
@@ -459,7 +447,7 @@ func downloadAudioWithYtDLP(ctx context.Context, videoURL, cookiesFile, cookiesF
 	childCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	args := []string{"-f", "bestaudio", "-o", "-", videoURL}
+	args := []string{"-f", ytDLPAudioFormat(requestLang), "-o", "-", videoURL}
 	if cookiesFile != "" {
 		args = append([]string{"--cookies", cookiesFile}, args...)
 	}
